@@ -1,7 +1,8 @@
 find_package(Threads REQUIRED)
+set(COMMON_SRC ipc/socket_implementation.c)
 
-add_executable(server server.c)
-add_executable(client client.c)
+add_executable(server server.c ipc/socket_implementation.c)
+add_executable(client client.c ipc/socket_implementation.c)
 
 target_link_libraries(server PRIVATE Threads::Threads)
 target_link_libraries(client PRIVATE Threads::Threads)
