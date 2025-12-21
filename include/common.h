@@ -8,7 +8,7 @@
 #include <arpa/inet.h>
 #include <pthread.h>
 
-#define PORT 8800
+#define PORT 8080
 #define MAX_PLAYERS 4
 #define INITIAL_LIVES 5
 
