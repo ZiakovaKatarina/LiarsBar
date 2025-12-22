@@ -12,10 +12,10 @@
 #define MAX_PLAYERS 4
 #define INITIAL_LIVES 5
 
-#define CARD_QUEEN 12
-#define CARD_KING 13
-#define CARD_ACE 14
-#define CARD_JOKER 15
+#define CARD_QUEEN 0
+#define CARD_KING 1
+#define CARD_ACE 2
+#define CARD_JOKER 3
 
 typedef enum MessageType {
     MSG_JOIN,

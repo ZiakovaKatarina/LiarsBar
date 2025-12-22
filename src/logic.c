@@ -1,4 +1,3 @@
-// src/logic.c
 #include "../include/common.h"
 #include "../include/ipc_interface.h"
 #include "../include/logic.h"
@@ -14,12 +13,12 @@ void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][INITIAL_LIVES],
     int balicek[20] = {0};
     int k = 0;
     for (int i = 0; i < 6; i++) {
-        balicek[k++] = 0; // Q
-        balicek[k++] = 1; // K
-        balicek[k++] = 2; // A
+        balicek[k++] = CARD_QUEEN;
+        balicek[k++] = CARD_KING;
+        balicek[k++] = CARD_ACE;
     }
-    balicek[18] = 3; // J
-    balicek[19] = 3; // J
+    balicek[18] = CARD_JOKER;
+    balicek[19] = CARD_JOKER;
 
     srand(time(NULL));
     for (int i = 19; i > 0; i--) {
@@ -29,11 +28,11 @@ void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][INITIAL_LIVES],
         balicek[j] = temp;
     }
 
-    // Rozdaj po 5 kariet každému hráčovi
+    int card_index = 0;
     for (int hrac = 0; hrac < MAX_PLAYERS; hrac++) {
-        if (sockets[hrac] != -1) {
-            for (int c = 0; c < INITIAL_LIVES; c++) {
-                player_cards[hrac][c] = balicek[hrac * INITIAL_LIVES + c];
+        if (sockets[hrac] != -1 && lives[hrac] > 0) {
+            for (int c = 0; c < lives[hrac]; c++) {
+                player_cards[hrac][c] = balicek[card_index++];
             }
 
             GamePacket pkt = {0};
