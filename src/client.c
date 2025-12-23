@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <pthread.h>
+#include <errno.h>
 
 #define SERVER_PATH "./server"  // cesta k spustiteľnému serveru (v build priečinku)
 
@@ -31,78 +32,87 @@ void print_card(int value) {
         default: printf("?"); break;
     }
 }
-
 void* receive_thread(void* arg) {
     ClientThreadArgs *args = (ClientThreadArgs*)arg;
     GamePacket pkt;
 
-    while(args->is_running) {
+    while (args->is_running) {
         int res = args->ipc.receive_packet(args->fd, &pkt);
-        
-        if (res <= 0) {
+
+        if (res > 0) {
+            // Úspešne packet – spracuj ho
+            switch(pkt.MessageType) {
+                case MSG_WELCOME:
+                    args->player_id = pkt.player_id;
+                    printf("\n[SERVER]: %s\n", pkt.text);
+                    break;
+
+                case MSG_START_ROUND:
+                    printf("\n=== NOVÉ KOLO ===\n");
+                    printf("Tvoje karty: ");
+                    for(int i = 0; i < INITIAL_LIVES; i++) {
+                        if (pkt.my_cards[i] >= 0) {
+                            print_card(pkt.my_cards[i]);
+                            printf(" ");
+                        }
+                    }
+                    printf("\n");
+                    memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
+                    args->current_player_id = pkt.current_player_id;
+                    break;
+
+                case MSG_UPDATE:
+                    args->current_player_id = pkt.current_player_id;
+                    args->current_bet_count = pkt.count;
+                    args->current_bet_value = pkt.card_value;
+                    memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
+                    printf("\n[UPDATE]: %s\n", pkt.text);
+                    break;
+
+                case MSG_GAME_OVER:
+                    printf("\n=== KONIEC HRY ===\n%s\n", pkt.text);
+                    args->is_running = 0;
+                    break;
+
+                default:
+                    printf("\n[SERVER]: %s\n", pkt.text);
+            }
+
+            // Zobrazenie stavu
+            printf("\nŽivoty: ");
+            for(int i = 0; i < MAX_PLAYERS; i++) {
+                if (args->lives[i] > 0 || i + 1 == args->player_id) {
+                    printf("Hráč %d: %d  ", i+1, args->lives[i]);
+                }
+            }
+            printf("\n");
+
+            if (args->current_bet_count > 0) {
+                printf("Aktuálna stávka: %dx ", args->current_bet_count);
+                print_card(args->current_bet_value);
+                printf("\n");
+            }
+
+            printf("Na ťahu je hráč %d", args->current_player_id);
+            if (args->current_player_id == args->player_id) {
+                printf(" <-- TY!");
+            }
+            printf("\n> ");
+            fflush(stdout);
+
+        } else {
+            // res <= 0
+            if (res < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                // Normálne čakanie – pokračuj v loope
+                usleep(100000);  // 0.1 sekundy – nízka záťaž
+                continue;
+            }
+
+            // Skutočný disconnect
             printf("\n[INFO]: Spojenie so serverom bolo prerušené.\n");
             args->is_running = 0;
             break;
         }
-
-        switch(pkt.MessageType) {
-            case MSG_WELCOME:
-                args->player_id = pkt.player_id;
-                printf("\n[SERVER]: %s\n", pkt.text);
-                break;
-
-            case MSG_START_ROUND:
-                printf("\n=== NOVÉ KOLO ===\n");
-                printf("Tvoje karty: ");
-                for(int i = 0; i < INITIAL_LIVES; i++) {
-                    if (pkt.my_cards[i] >= 0) {
-                        print_card(pkt.my_cards[i]);
-                        printf(" ");
-                    }
-                }
-                printf("\n");
-                memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
-                args->current_player_id = pkt.current_player_id;
-                break;
-
-            case MSG_UPDATE:
-                args->current_player_id = pkt.current_player_id;
-                args->current_bet_count = pkt.count;
-                args->current_bet_value = pkt.card_value;
-                memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
-                printf("\n[UPDATE]: %s\n", pkt.text);
-                break;
-
-            case MSG_GAME_OVER:
-                printf("\n=== KONIEC HRY ===\n%s\n", pkt.text);
-                args->is_running = 0;
-                break;
-
-            default:
-                printf("\n[SERVER]: %s\n", pkt.text);
-        }
-
-        // Zobrazenie aktuálneho stavu
-        printf("\nŽivoty: ");
-        for(int i = 0; i < MAX_PLAYERS; i++) {
-            if (args->lives[i] > 0 || i + 1 == args->player_id) {
-                printf("Hráč %d: %d  ", i+1, args->lives[i]);
-            }
-        }
-        printf("\n");
-
-        if (args->current_bet_count > 0) {
-            printf("Aktuálna stávka: %dx ", args->current_bet_count);
-            print_card(args->current_bet_value);
-            printf("\n");
-        }
-
-        printf("Na ťahu je hráč %d", args->current_player_id);
-        if (args->current_player_id == args->player_id) {
-            printf(" <-- TY!");
-        }
-        printf("\n> ");
-        fflush(stdout);
     }
 
     return NULL;
@@ -117,27 +127,42 @@ void start_new_game(IPC_Interface ipc, ClientThreadArgs *args) {
     }
 
     if (pid == 0) {
-        // Child proces - spusti server
-        char *argv[] = {SERVER_PATH, NULL};
-        execvp(SERVER_PATH, argv);
-        perror("execvp server");
+        char *argv[] = {"server", NULL};
+        execvp("./build/src/server", argv);
+        perror("execvp");
         exit(1);
     }
 
-    // Parent (klient) - počká chvíľu a pripojí sa
-    sleep(1);  // aby sa server stihol naštartovať
+    int attempts = 0;
+    args->fd = -1;
+    while (attempts < 30 && args->fd < 0) {
+        args->fd = ipc.init_client("127.0.0.1");
+        if (args->fd >= 0) break;
+        sleep(1);
+        attempts++;
+    }
 
-    args->fd = ipc.init_client("127.0.0.1");
     if (args->fd < 0) {
-        printf("Nepodarilo sa pripojiť k novovytvorenému serveru.\n");
+        printf("\n[CHYBA]: Nepodarilo sa pripojiť k serveru.\n");
         exit(1);
     }
 
     printf("Server spustený a pripojený ako prvý hráč.\n");
+
+    sleep(1);
+
+    // Pošli join
+    GamePacket join_pkt = { .MessageType = MSG_JOIN };
+    strcpy(join_pkt.text, "Som hostiteľ");
+    ipc.send_packet(args->fd, &join_pkt);
+
+    GamePacket test_pkt = { .MessageType = MSG_TEST };
+    strcpy(test_pkt.text, "Ahoj server!");
+    ipc.send_packet(args->fd, &test_pkt);
 }
 
 int main() {
-    IPC_Interface socket_ipc = get_socket_interface();
+    IPC_Interface socket_ipc = get_pipe_interface();
     ClientThreadArgs args = {0};
     args.ipc = socket_ipc;
     args.is_running = 1;

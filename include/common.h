@@ -11,6 +11,7 @@
 #define PORT 8080
 #define MAX_PLAYERS 4
 #define INITIAL_LIVES 5
+#define MSG_TEST 99
 
 #define CARD_QUEEN 12
 #define CARD_KING 13

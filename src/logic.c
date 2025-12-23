@@ -7,7 +7,7 @@
 #include <string.h>
 
 void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][INITIAL_LIVES],
-                          int sockets[MAX_PLAYERS],
+                          int write_fds[MAX_PLAYERS],  // ZMENENÉ: teraz používame write_fds
                           IPC_Interface ipc,
                           int lives[MAX_PLAYERS],
                           int current_player) {
@@ -31,7 +31,7 @@ void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][INITIAL_LIVES],
 
     // Rozdaj po 5 kariet každému hráčovi
     for (int hrac = 0; hrac < MAX_PLAYERS; hrac++) {
-        if (sockets[hrac] != -1) {
+        if (write_fds[hrac] != -1) {  // ZMENENÉ: kontrolujeme write_fds
             for (int c = 0; c < INITIAL_LIVES; c++) {
                 player_cards[hrac][c] = balicek[hrac * INITIAL_LIVES + c];
             }
@@ -43,7 +43,7 @@ void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][INITIAL_LIVES],
             memcpy(pkt.lives, lives, sizeof(pkt.lives));
             pkt.current_player_id = current_player + 1;  // ID od 1
 
-            ipc.send_packet(sockets[hrac], &pkt);
+            ipc.send_packet(write_fds[hrac], &pkt);
         }
     }
 }
