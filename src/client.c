@@ -2,119 +2,132 @@
 #include "../include/ipc_interface.h"
 #include <stdio.h>
 #include <ctype.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <pthread.h>
-#include <errno.h>
 
-#define SERVER_PATH "./server"  // cesta k spustiteľnému serveru (v build priečinku)
-
+#define SERVER_PATH "./server"
+/*
+git checkout -b nazovVetvy
+git add .
+git commit -m "nazov commit"
+git commit -m "nazov commit 2"
+git commit -m "nazov commit 3"
+git checkout main
+git merge nazovVetvy
+git push origin main
+*/
 typedef struct ClientThreadArgs {
     int fd;
     IPC_Interface ipc;
     volatile int is_running;
     int player_id;
-    int my_lives;
     int lives[MAX_PLAYERS];
     int current_player_id;
     int current_bet_count;
     int current_bet_value;
+    bool game_started;
+    int my_cards[INITIAL_LIVES];
 } ClientThreadArgs;
 
 void print_card(int value) {
     switch(value) {
-        case 0: printf("Q"); break;
-        case 1: printf("K"); break;
-        case 2: printf("A"); break;
-        case 3: printf("J"); break;
+        case CARD_QUEEN: printf("Q"); break;
+        case CARD_KING: printf("K"); break;
+        case CARD_ACE: printf("A"); break;
+        case CARD_JOKER: printf("J"); break;
         default: printf("?"); break;
     }
 }
+
 void* receive_thread(void* arg) {
     ClientThreadArgs *args = (ClientThreadArgs*)arg;
     GamePacket pkt;
 
-    while (args->is_running) {
+    while(args->is_running) {
         int res = args->ipc.receive_packet(args->fd, &pkt);
 
-        if (res > 0) {
-            // Úspešne packet – spracuj ho
-            switch(pkt.MessageType) {
-                case MSG_WELCOME:
-                    args->player_id = pkt.player_id;
-                    printf("\n[SERVER]: %s\n", pkt.text);
-                    break;
+        if (res <= 0) {
+            printf("\n[INFO]: Spojenie prerušené.\n");
+            args->is_running = 0;
+            break;
+        }
 
-                case MSG_START_ROUND:
-                    printf("\n=== NOVÉ KOLO ===\n");
+        switch(pkt.MessageType) {
+            case MSG_WELCOME:
+                args->player_id = pkt.player_id;
+                memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
+                printf("[SERVER]: Vitaj! Si Hráč %d.", pkt.player_id);
+                break;
+
+            case MSG_START_ROUND:
+                args->game_started = true;
+                printf("\n=== NOVÉ KOLO ===\n");
+                printf("Tvoje karty: ");
+                for(int i = 0; i < INITIAL_LIVES; i++) {
+                    if (pkt.my_cards[i] >= 0) {
+                        print_card(pkt.my_cards[i]);
+                        printf(" ");
+                    }
+                }
+                printf("\n");
+                memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
+                args->current_player_id = pkt.current_player_id;
+                memcpy(args->my_cards, pkt.my_cards, sizeof(pkt.my_cards));
+                break;
+
+            case MSG_UPDATE:
+                memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
+                args->current_player_id = pkt.current_player_id;
+                args->current_bet_count = pkt.count;
+                args->current_bet_value = pkt.card_value;
+                printf("\n[UPDATE]: %s\n", pkt.text);
+
+                if (args->game_started) {
+                    printf("\nŽivoty:\n");
+                    for(int i = 0; i < MAX_PLAYERS; i++) {
+                        if (args->lives[i] > 0 || i + 1 == args->player_id) {
+                            printf("\tHráč %d: %d\n", i+1, args->lives[i]);
+                        }
+                    }
+                    printf("\n");
+
+                    if (args->current_bet_count > 0) {
+                        printf("Aktuálna stávka: %dx ", args->current_bet_count);
+                        print_card(args->current_bet_value);
+                        printf("\n");
+                    }
+
+                    printf("Na ťahu je hráč %d", args->current_player_id);
+                    if (args->current_player_id == args->player_id) {
+                        printf(" <-- TY!");
+                    }
+                    printf("\n");
+
                     printf("Tvoje karty: ");
-                    for(int i = 0; i < INITIAL_LIVES; i++) {
-                        if (pkt.my_cards[i] >= 0) {
-                            print_card(pkt.my_cards[i]);
+                    for (int i = 0; i < INITIAL_LIVES; i++) {
+                        if (args->my_cards[i] >= 0) {
+                            print_card(args->my_cards[i]);
                             printf(" ");
                         }
                     }
                     printf("\n");
-                    memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
-                    args->current_player_id = pkt.current_player_id;
-                    break;
-
-                case MSG_UPDATE:
-                    args->current_player_id = pkt.current_player_id;
-                    args->current_bet_count = pkt.count;
-                    args->current_bet_value = pkt.card_value;
-                    memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
-                    printf("\n[UPDATE]: %s\n", pkt.text);
-                    break;
-
-                case MSG_GAME_OVER:
-                    printf("\n=== KONIEC HRY ===\n%s\n", pkt.text);
-                    args->is_running = 0;
-                    break;
-
-                default:
-                    printf("\n[SERVER]: %s\n", pkt.text);
-            }
-
-            // Zobrazenie stavu
-            printf("\nŽivoty: ");
-            for(int i = 0; i < MAX_PLAYERS; i++) {
-                if (args->lives[i] > 0 || i + 1 == args->player_id) {
-                    printf("Hráč %d: %d  ", i+1, args->lives[i]);
                 }
-            }
-            printf("\n");
 
-            if (args->current_bet_count > 0) {
-                printf("Aktuálna stávka: %dx ", args->current_bet_count);
-                print_card(args->current_bet_value);
-                printf("\n");
-            }
+                printf("> ");
+                fflush(stdout);
 
-            printf("Na ťahu je hráč %d", args->current_player_id);
-            if (args->current_player_id == args->player_id) {
-                printf(" <-- TY!");
-            }
-            printf("\n> ");
-            fflush(stdout);
+                break;
 
-        } else {
-            // res <= 0
-            if (res < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                // Normálne čakanie – pokračuj v loope
-                usleep(100000);  // 0.1 sekundy – nízka záťaž
-                continue;
-            }
-
-            // Skutočný disconnect
-            printf("\n[INFO]: Spojenie so serverom bolo prerušené.\n");
-            args->is_running = 0;
-            break;
+            case MSG_GAME_OVER:
+                printf("\n=== KONIEC HRY ===\n%s\n", pkt.text);
+                args->is_running = 0;
+                break;
         }
     }
-
     return NULL;
 }
 
@@ -127,51 +140,38 @@ void start_new_game(IPC_Interface ipc, ClientThreadArgs *args) {
     }
 
     if (pid == 0) {
-        char *argv[] = {"server", NULL};
-        execvp("./build/src/server", argv);
+        char *argv[] = {SERVER_PATH, NULL};
+        execvp(SERVER_PATH, argv);
         perror("execvp");
         exit(1);
     }
 
-    int attempts = 0;
-    args->fd = -1;
-    while (attempts < 30 && args->fd < 0) {
-        args->fd = ipc.init_client("127.0.0.1");
-        if (args->fd >= 0) break;
-        sleep(1);
-        attempts++;
-    }
+    sleep(1);
 
+    args->fd = ipc.init_client("127.0.0.1");
     if (args->fd < 0) {
-        printf("\n[CHYBA]: Nepodarilo sa pripojiť k serveru.\n");
+        printf("Nepodarilo sa pripojiť.\n");
         exit(1);
     }
 
-    printf("Server spustený a pripojený ako prvý hráč.\n");
-
     sleep(1);
 
-    // Pošli join
     GamePacket join_pkt = { .MessageType = MSG_JOIN };
     strcpy(join_pkt.text, "Som hostiteľ");
     ipc.send_packet(args->fd, &join_pkt);
-
-    GamePacket test_pkt = { .MessageType = MSG_TEST };
-    strcpy(test_pkt.text, "Ahoj server!");
-    ipc.send_packet(args->fd, &test_pkt);
 }
 
 int main() {
-    IPC_Interface socket_ipc = get_pipe_interface();
+    IPC_Interface socket_ipc = get_socket_interface();
     ClientThreadArgs args = {0};
     args.ipc = socket_ipc;
-    args.is_running = 1;
 
     while(1) {
         printf("\n=== LIAR'S BAR ===\n");
         printf("1. Nová hra\n");
         printf("2. Pripojenie k hre\n");
         printf("3. Koniec\n");
+        printf("4. Pravidlá hry\n");
         printf("Voľba: ");
         fflush(stdout);
 
@@ -181,86 +181,104 @@ int main() {
         int choice = atoi(line);
 
         if (choice == 1) {
+            args.is_running = 1;
+            args.game_started = false;
             start_new_game(socket_ipc, &args);
-
-            // Pošli JOIN
-            GamePacket join_pkt = { .MessageType = MSG_JOIN };
-            strcpy(join_pkt.text, "Som hostiteľ");
-            socket_ipc.send_packet(args.fd, &join_pkt);
-
-            break;  // prejdi do herného loopu
         }
         else if (choice == 2) {
-            // Zatiaľ fixný localhost
+            args.is_running = 1;
+            args.game_started = false;
             args.fd = socket_ipc.init_client("127.0.0.1");
             if (args.fd < 0) {
-                printf("Nepodarilo sa pripojiť. Skús neskôr alebo spusti novú hru.\n");
+                printf("Nepodarilo sa pripojiť.\n");
                 continue;
             }
+
+            sleep(1);
 
             GamePacket join_pkt = { .MessageType = MSG_JOIN };
             strcpy(join_pkt.text, "Pripojil som sa");
             socket_ipc.send_packet(args.fd, &join_pkt);
-
-            break;
         }
         else if (choice == 3) {
-            printf("Dovidenia!\n");
             return 0;
+        }
+        else if (choice == 4) {
+            printf("\n=== PRAVIDLÁ HRY LIAR'S BAR ===\n");
+            printf(" - Hra pre 2-4 hráčov s balíčkom 6x Q, 6x K, 6x A, 2x J (žolík).\n");
+            printf(" - Každý hráč začína s 5 životmi (kartami).\n");
+            printf(" - Hráči sa striedajú v stávkach na celkový počet a hodnotu kariet na stole (napr. '3 K' = aspoň 3 krále).\n");
+            printf(" - Stávka musí byť vyššia (väčší počet alebo rovnaký počet a vyššia hodnota: Q < K < A < J).\n");
+            printf(" - Hráč na ťahu môže stávkovať alebo volať 'klamar' na predchádzajúcu stávku.\n");
+            printf(" - Ak je klamár úspešný, stávkujúci stráca život. Ak nie, klamár stráca život.\n");
+            printf(" - Po strate života sa rozdajú nové karty (podľa aktuálnych životov).\n");
+            printf(" - Hra končí, keď ostane jeden hráč s životmi.\n");
+            printf(" - Príkaz 'quit' kedykoľvek pre návrat do menu.\n\n");
+            continue;
         }
         else {
             printf("Neplatná voľba.\n");
+            continue;
         }
-    }
 
-    // Spusti receive vlákno
-    pthread_t recv_thread;
-    pthread_create(&recv_thread, NULL, receive_thread, &args);
-    
-    // Hlavný thread na vstup od hráča
-    char input[256];
-    while(args.is_running && fgets(input, sizeof(input), stdin)) {
-        input[strcspn(input, "\n")] = 0;  // odstráň \n
+        pthread_t recv_thread;
+        pthread_create(&recv_thread, NULL, receive_thread, &args);
 
-        if (strlen(input) == 0) continue;
+        char input[256];
+        while(args.is_running && fgets(input, sizeof(input), stdin)) {
+            input[strcspn(input, "\n")] = 0;
 
-        GamePacket pkt = {0};
+            if (strlen(input) == 0) continue;
 
-        if (strcmp(input, "klamar") == 0 || strcmp(input, "liar") == 0) {
-            pkt.MessageType = MSG_LIAR;
-            strcpy(pkt.text, "KLAMÁR!");
-        } else {
-            // Očakávame formát napr. "3 K" alebo "5 A"
-            int count;
-            char card_char;
-            if (sscanf(input, "%d %c", &count, &card_char) == 2) {
-                int value = -1;
-                switch(toupper(card_char)) {
-                    case 'Q': value = 0; break;
-                    case 'K': value = 1; break;
-                    case 'A': value = 2; break;
-                    case 'J': value = 3; break;
-                }
-                if (value != -1 && count > 0) {
-                    pkt.MessageType = MSG_BET;
-                    pkt.count = count;
-                    pkt.card_value = value;
+            if (strcmp(input, "quit") == 0) {
+                printf("\nNávrat do hlavného menu...\n");
+                args.is_running = 0;
+                socket_ipc.close_conn(args.fd);
+                pthread_join(recv_thread, NULL);
+                args.game_started = false;
+                args.current_player_id = 0;
+                args.current_bet_count = 0;
+                args.current_bet_value = -1;
+                args.player_id = 0;
+                memset(args.lives, 0, sizeof(args.lives));
+                break; 
+            }
+
+            GamePacket pkt = {0};
+
+            if (strcasecmp(input, "klamar") == 0) {
+                pkt.MessageType = MSG_LIAR;
+            } else {
+                int count;
+                char card_char;
+                if (sscanf(input, "%d %c", &count, &card_char) == 2) {
+                    int value = -1;
+                    switch(toupper(card_char)) {
+                        case 'Q': value = CARD_QUEEN; break;
+                        case 'K': value = CARD_KING; break;
+                        case 'A': value = CARD_ACE; break;
+                        case 'J': value = CARD_JOKER; break;
+                    }
+                    if (value != -1 && count > 0) {
+                        pkt.MessageType = MSG_BET;
+                        pkt.count = count;
+                        pkt.card_value = value;
+                    } else {
+                        printf("Zlá karta alebo počet.\n> ");
+                        continue;
+                    }
                 } else {
-                    printf("Neznáma karta. Použi Q, K, A alebo J.\n> ");
+                    printf("Nerozumiem príkazu.\n> ");
                     continue;
                 }
-            } else {
-                printf("Nesprávny formát. Použi napr. '3 K' alebo 'klamar'.\n> ");
-                continue;
             }
+
+            socket_ipc.send_packet(args.fd, &pkt);
         }
 
-        socket_ipc.send_packet(args.fd, &pkt);
+        pthread_join(recv_thread, NULL);
+        socket_ipc.close_conn(args.fd);
     }
-
-    args.is_running = 0;
-    pthread_join(recv_thread, NULL);
-    socket_ipc.close_conn(args.fd);
 
     return 0;
 }

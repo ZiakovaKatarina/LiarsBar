@@ -1,4 +1,3 @@
-// src/logic.c
 #include "../include/common.h"
 #include "../include/ipc_interface.h"
 #include "../include/logic.h"
@@ -7,19 +6,19 @@
 #include <string.h>
 
 void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][INITIAL_LIVES],
-                          int write_fds[MAX_PLAYERS],  // ZMENENÉ: teraz používame write_fds
+                          int sockets[MAX_PLAYERS],
                           IPC_Interface ipc,
                           int lives[MAX_PLAYERS],
                           int current_player) {
     int balicek[20] = {0};
     int k = 0;
     for (int i = 0; i < 6; i++) {
-        balicek[k++] = 0; // Q
-        balicek[k++] = 1; // K
-        balicek[k++] = 2; // A
+        balicek[k++] = CARD_QUEEN;
+        balicek[k++] = CARD_KING;
+        balicek[k++] = CARD_ACE;
     }
-    balicek[18] = 3; // J
-    balicek[19] = 3; // J
+    balicek[18] = CARD_JOKER;
+    balicek[19] = CARD_JOKER;
 
     srand(time(NULL));
     for (int i = 19; i > 0; i--) {
@@ -29,11 +28,11 @@ void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][INITIAL_LIVES],
         balicek[j] = temp;
     }
 
-    // Rozdaj po 5 kariet každému hráčovi
+    int card_index = 0;
     for (int hrac = 0; hrac < MAX_PLAYERS; hrac++) {
-        if (write_fds[hrac] != -1) {  // ZMENENÉ: kontrolujeme write_fds
-            for (int c = 0; c < INITIAL_LIVES; c++) {
-                player_cards[hrac][c] = balicek[hrac * INITIAL_LIVES + c];
+        if (sockets[hrac] != -1 && lives[hrac] > 0) {
+            for (int c = 0; c < lives[hrac]; c++) {
+                player_cards[hrac][c] = balicek[card_index++];
             }
 
             GamePacket pkt = {0};
@@ -41,9 +40,9 @@ void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][INITIAL_LIVES],
             strcpy(pkt.text, "Dostal si nové karty!");
             memcpy(pkt.my_cards, player_cards[hrac], sizeof(pkt.my_cards));
             memcpy(pkt.lives, lives, sizeof(pkt.lives));
-            pkt.current_player_id = current_player + 1;  // ID od 1
+            pkt.current_player_id = current_player + 1;
 
-            ipc.send_packet(write_fds[hrac], &pkt);
+            ipc.send_packet(sockets[hrac], &pkt);
         }
     }
 }
