@@ -40,7 +40,7 @@ void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][INITIAL_LIVES],
             strcpy(pkt.text, "Dostal si nové karty!");
             memcpy(pkt.my_cards, player_cards[hrac], sizeof(pkt.my_cards));
             memcpy(pkt.lives, lives, sizeof(pkt.lives));
-            pkt.current_player_id = current_player + 1;  // ID od 1
+            pkt.current_player_id = current_player + 1;
 
             ipc.send_packet(sockets[hrac], &pkt);
         }

@@ -9,8 +9,17 @@
 #include <sys/wait.h>
 #include <pthread.h>
 
-#define SERVER_PATH "server"
-
+#define SERVER_PATH "./server"
+/*
+git checkout -b nazovVetvy
+git add .
+git commit -m "nazov commit"
+git commit -m "nazov commit 2"
+git commit -m "nazov commit 3"
+git checkout main
+git merge nazovVetvy
+git push origin main
+*/
 typedef struct ClientThreadArgs {
     int fd;
     IPC_Interface ipc;
@@ -21,6 +30,7 @@ typedef struct ClientThreadArgs {
     int current_bet_count;
     int current_bet_value;
     bool game_started;
+    int my_cards[INITIAL_LIVES];
 } ClientThreadArgs;
 
 void print_card(int value) {
@@ -50,7 +60,7 @@ void* receive_thread(void* arg) {
             case MSG_WELCOME:
                 args->player_id = pkt.player_id;
                 memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
-                printf("\n[SERVER]: %s\n", pkt.text);
+                printf("[SERVER]: Vitaj! Si Hráč %d.", pkt.player_id);
                 break;
 
             case MSG_START_ROUND:
@@ -66,6 +76,7 @@ void* receive_thread(void* arg) {
                 printf("\n");
                 memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
                 args->current_player_id = pkt.current_player_id;
+                memcpy(args->my_cards, pkt.my_cards, sizeof(pkt.my_cards));
                 break;
 
             case MSG_UPDATE:
@@ -74,40 +85,47 @@ void* receive_thread(void* arg) {
                 args->current_bet_count = pkt.count;
                 args->current_bet_value = pkt.card_value;
                 printf("\n[UPDATE]: %s\n", pkt.text);
+
+                if (args->game_started) {
+                    printf("\nŽivoty:\n");
+                    for(int i = 0; i < MAX_PLAYERS; i++) {
+                        if (args->lives[i] > 0 || i + 1 == args->player_id) {
+                            printf("\tHráč %d: %d\n", i+1, args->lives[i]);
+                        }
+                    }
+                    printf("\n");
+
+                    if (args->current_bet_count > 0) {
+                        printf("Aktuálna stávka: %dx ", args->current_bet_count);
+                        print_card(args->current_bet_value);
+                        printf("\n");
+                    }
+
+                    printf("Na ťahu je hráč %d", args->current_player_id);
+                    if (args->current_player_id == args->player_id) {
+                        printf(" <-- TY!");
+                    }
+                    printf("\n");
+
+                    printf("Tvoje karty: ");
+                    for (int i = 0; i < INITIAL_LIVES; i++) {
+                        if (args->my_cards[i] >= 0) {
+                            print_card(args->my_cards[i]);
+                            printf(" ");
+                        }
+                    }
+                    printf("\n");
+                }
+
+                printf("> ");
+                fflush(stdout);
+
                 break;
 
             case MSG_GAME_OVER:
                 printf("\n=== KONIEC HRY ===\n%s\n", pkt.text);
                 args->is_running = 0;
                 break;
-        }
-
-        if (args->game_started) {
-            printf("\nŽivoty: ");
-            for(int i = 0; i < MAX_PLAYERS; i++) {
-                if (args->lives[i] > 0 || i + 1 == args->player_id) {
-                    printf("Hráč %d: %d  ", i+1, args->lives[i]);
-                }
-            }
-            printf("\n");
-
-            if (args->current_bet_count > 0) {
-                printf("Aktuálna stávka: %dx ", args->current_bet_count);
-                print_card(args->current_bet_value);
-                printf("\n");
-            }
-
-            printf("Na ťahu je hráč %d", args->current_player_id);
-            if (args->current_player_id == args->player_id) {
-                printf(" <-- TY!");
-            }
-            printf("\n");
-
-            printf("> ");
-            fflush(stdout);
-        } else {
-            printf("> ");
-            fflush(stdout);
         }
     }
     return NULL;

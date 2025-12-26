@@ -7,7 +7,7 @@
 #include <string.h>
 #include <pthread.h>
 
-#define MIN_PLAYERS 2
+#define MIN_PLAYERS 4
 
 typedef struct {
     int sockets[MAX_PLAYERS];
@@ -47,18 +47,6 @@ void start_new_round(GameData *game) {
 
     rozdaj_karty_vsetkym(game->player_cards, game->sockets, game->ipc, game->lives, game->current_player);
 
-    for (int i = 0; i < MAX_PLAYERS; i++) {
-        if (game->sockets[i] != -1 && game->lives[i] > 0) {
-            GamePacket start_pkt = {0};
-            start_pkt.MessageType = MSG_START_ROUND;
-            strcpy(start_pkt.text, "Dostal si nové karty!");
-            memcpy(start_pkt.my_cards, game->player_cards[i], sizeof(start_pkt.my_cards));
-            memcpy(start_pkt.lives, game->lives, sizeof(game->lives));
-            start_pkt.current_player_id = 1;
-            game->ipc.send_packet(game->sockets[i], &start_pkt);
-        }
-    }
-
     GamePacket update_pkt = {0};
     update_pkt.MessageType = MSG_UPDATE;
     strcpy(update_pkt.text, "Nové kolo začalo! Na ťahu je Hráč 1.");
@@ -71,65 +59,54 @@ void start_new_round(GameData *game) {
 
 void evaluate_liar(GameData *game, int caller_id) {
     int called_value = game->current_bet_value;
-    int called_count = game->current_bet_count;
-    int actual_count = 0;
+    int bet_count = game->current_bet_count;
 
+    int total_count = 0;
     for (int p = 0; p < MAX_PLAYERS; p++) {
-        if (game->sockets[p] != -1 && game->lives[p] > 0) {
+        if (game->lives[p] > 0) {
             for (int c = 0; c < game->lives[p]; c++) {
-                if (game->player_cards[p][c] == called_value) actual_count++;
+                if (game->player_cards[p][c] == called_value) {
+                    total_count++;
+                }
             }
         }
     }
 
-    int previous_player = (game->current_player - 1 + MAX_PLAYERS) % MAX_PLAYERS;
-    while (game->lives[previous_player] <= 0) {
-        previous_player = (previous_player - 1 + MAX_PLAYERS) % MAX_PLAYERS;
-    }
-    int bettor_id = previous_player + 1;
-
-    int loser_id;
-    char result_text[256];
-
-    if (actual_count >= called_count) {
-        loser_id = caller_id;
-        sprintf(result_text, "Klamár neuspel! Bolo %d alebo viac. Hráč %d stráca život.", actual_count, caller_id);
-    } else {
-        loser_id = bettor_id;
-        sprintf(result_text, "Klamár úspešný! Bolo len %d. Hráč %d stráca život.", actual_count, bettor_id);
-    }
-
-    game->lives[loser_id - 1]--;
+    bool liar_succeeds = (total_count < bet_count);
+    int loser_id = liar_succeeds ? game->current_player : caller_id;
+    
+    game->lives[loser_id]--;
 
     GamePacket result_pkt = {0};
     result_pkt.MessageType = MSG_UPDATE;
-    strcpy(result_pkt.text, result_text);
+    if (liar_succeeds) {
+        sprintf(result_pkt.text, "Klamár uspel! Bolo len %d. Hráč %d stráca život.", total_count, loser_id + 1);
+    } else {
+        sprintf(result_pkt.text, "Klamár neuspel! Bolo %d alebo viac. Hráč %d stráca život.", bet_count, loser_id + 1);
+    }
     memcpy(result_pkt.lives, game->lives, sizeof(game->lives));
-    result_pkt.current_player_id = 1;
-    result_pkt.count = 0;
-    result_pkt.card_value = -1;
     broadcast(game, &result_pkt);
 
-    int alive = 0;
-    int winner = -1;
+    // Check for game over
+    int alive_count = 0;
+    int winner_id = -1;
     for (int i = 0; i < MAX_PLAYERS; i++) {
         if (game->lives[i] > 0) {
-            alive++;
-            winner = i + 1;
+            alive_count++;
+            winner_id = i;
         }
     }
 
-    if (alive <= 1) {
-        GamePacket go_pkt = {0};
-        go_pkt.MessageType = MSG_GAME_OVER;
-        if (alive == 1) sprintf(go_pkt.text, "Víťaz je Hráč %d!", winner);
-        else strcpy(go_pkt.text, "Nikto nevyhral.");
-        broadcast(game, &go_pkt);
+    if (alive_count <= 1) {
+        GamePacket game_over_pkt = {0};
+        game_over_pkt.MessageType = MSG_GAME_OVER;
+        sprintf(game_over_pkt.text, "Hra skončila! Víťaz je Hráč %d.", winner_id + 1);
+        broadcast(game, &game_over_pkt);
         game->round_active = 0;
-        return;
+    } else {
+        game->round_active = 0;
+        start_new_round(game);
     }
-
-    start_new_round(game);
 }
 
 void* handle_client(void* arg) {
@@ -160,7 +137,7 @@ void* handle_client(void* arg) {
     ta->game->ipc.send_packet(ta->fd, &welcome);
 
     char wait_text[100];
-    sprintf(wait_text, "Čakáme na ďalších hráčov... (%d/%d)", ta->game->connected_players_count, MAX_PLAYERS);
+    sprintf(wait_text, "Čakáme na ďalších hráčov... (%d/%d)", ta->game->connected_players_count, MIN_PLAYERS);
     GamePacket wait_pkt = {0};
     wait_pkt.MessageType = MSG_UPDATE;
     strcpy(wait_pkt.text, wait_text);
