@@ -5,6 +5,9 @@ project(
     LANGUAGES C
 )
 
+set(CMAKE_C_FLAGS_DEBUG "-g -O0")
+set(CMAKE_BUILD_TYPE Debug)
+
 set(CMAKE_C_STANDARD 11)
 
 find_package(Threads REQUIRED)
