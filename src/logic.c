@@ -38,7 +38,14 @@ void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][INITIAL_LIVES],
             GamePacket pkt = {0};
             pkt.MessageType = MSG_START_ROUND;
             strcpy(pkt.text, "Dostal si nové karty!");
-            memcpy(pkt.my_cards, player_cards[hrac], sizeof(pkt.my_cards));
+            for (int i = 0; i < INITIAL_LIVES; i++) {
+                pkt.my_cards[i] = -1;
+            }
+
+            for (int i = 0; i < lives[hrac]; i++) {
+                pkt.my_cards[i] = player_cards[hrac][i];
+            }
+
             memcpy(pkt.lives, lives, sizeof(pkt.lives));
             pkt.current_player_id = current_player + 1;
 

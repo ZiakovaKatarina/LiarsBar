@@ -10,7 +10,8 @@
 
 #define PORT 8080
 #define MAX_PLAYERS 4
-#define INITIAL_LIVES 5
+#define MIN_PLAYERS 2
+#define INITIAL_LIVES 2
 #define MSG_TEST 99
 
 #define CARD_QUEEN 0
@@ -45,5 +46,15 @@ typedef struct GamePacket {
     int current_player_id;
     char text[256];
 } GamePacket;
+
+#define RED     "\x1b[31m"
+#define GREEN   "\x1b[32m"
+#define YELLOW  "\x1b[33m"
+#define BLUE    "\x1b[34m"
+#define MAGENTA "\x1b[35m"
+#define CYAN    "\x1b[36m"
+#define WHITE   "\x1b[37m"
+#define BOLD    "\x1b[1m"
+#define RESET   "\x1b[0m"
 
 #endif
