@@ -95,17 +95,6 @@ void* receive_thread(void* arg) {
                 args->player_id = pkt.player_id;
                 memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
                 printf(CYAN "[SERVER]: 🎮 Vitaj! Si Hráč %d." RESET "\n", pkt.player_id);
-
-                int connected = 0;
-                for (int i = 0; i < MAX_PLAYERS; i++) {
-                    if (args->lives[i] > 0) connected++;
-                }
-                
-                if (connected < MIN_PLAYERS) {
-                    printf(YELLOW "⏳ Čakáme na ďalších hráčov... (%d/%d)" RESET "\n\n", connected, MIN_PLAYERS);
-                } else {
-                    printf(GREEN "✅ Máme dosť hráčov! Hra čoskoro začne...\n\n" RESET);
-                }
                 break;
 
             case MSG_START_ROUND:
@@ -138,7 +127,11 @@ void* receive_thread(void* arg) {
                 args->current_bet_value = pkt.card_value;
 
                 bool waiting = (args->current_player_id == 0 && args->current_bet_count == 0 && !args->game_started);
-                if (waiting) break;
+                if (waiting) {
+                    // Zobraz aktualizáciu počtu hráčov
+                    printf("%s\n", pkt.text);
+                    break;
+                }
 
                 printf(BLUE "[UPDATE]: %s" RESET "\n", pkt.text);
 
@@ -161,7 +154,8 @@ void* receive_thread(void* arg) {
                 printf(BOLD YELLOW "\n╔════════════════════════════════╗\n");
                 printf("║        🏆 KONIEC HRY 🏆        ║\n");
                 printf("╚════════════════════════════════╝" RESET "\n");
-                printf(GREEN "%s" RESET "\n", pkt.text);
+                printf(GREEN "%s" RESET "\n\n", pkt.text);
+                printf(CYAN "Stlač Enter pre návrat do hlavného menu..." RESET "\n");
                 args->is_running = 0;
                 break;
         }
@@ -235,26 +229,6 @@ int main() {
                 pthread_t recv_tid;
                 pthread_create(&recv_tid, NULL, receive_thread, &args);
 
-                int last_shown_count = 0;
-                while (args.is_running && !args.game_started) {
-                    int current_count = 0;
-                    for (int i = 0; i < MAX_PLAYERS; i++) {
-                        if (args.lives[i] > 0) current_count++;
-                    }
-                    if (current_count > last_shown_count && current_count <= MIN_PLAYERS) {
-                        printf(CYAN "⏳ Čakáme na ďalších hráčov... (%d/%d)" RESET "\n",
-                               current_count, MIN_PLAYERS);
-                        last_shown_count = current_count;
-                    }
-                    usleep(200000);
-                }
-
-                if (!args.is_running) {
-                    pthread_join(recv_tid, NULL);
-                    socket_ipc.close_conn(args.fd);
-                    break;
-                }
-
                 char input[256];
                 while (args.is_running) {
                     if (!fgets(input, sizeof(input), stdin)) {
@@ -304,6 +278,7 @@ int main() {
 
                 pthread_join(recv_tid, NULL);
                 socket_ipc.close_conn(args.fd);
+                printf(CYAN "\nNávrat do hlavného menu...\n\n" RESET);
                 break;
             }
 
@@ -378,6 +353,7 @@ int main() {
 
                 pthread_join(recv_tid, NULL);
                 socket_ipc.close_conn(args.fd);
+                printf(CYAN "\nNávrat do hlavného menu...\n\n" RESET);
                 break;
             }
 

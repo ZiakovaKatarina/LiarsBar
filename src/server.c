@@ -138,23 +138,12 @@ void* handle_client(void* arg) {
         ta->game->lives[my_id - 1] = INITIAL_LIVES;
         ta->player_id = my_id;
 
-        // Show progress towards MIN_PLAYERS (e.g., 1/2), cap numerator at MIN_PLAYERS
         int denom = MIN_PLAYERS;
         int shown = ta->game->connected_players_count;
         if (shown > denom) shown = denom;
 
         printf(BLUE "[SERVER]" RESET " " GREEN "🔗 Hráč %d sa pripojil. Pripojení: %d/%d" RESET "\n",
                my_id, shown, denom);
-
-        GamePacket wait_pkt = {0};
-        wait_pkt.MessageType = MSG_UPDATE;
-        if (ta->game->connected_players_count < MIN_PLAYERS) {
-            sprintf(wait_pkt.text, CYAN "Čakáme na ďalších hráčov... (%d/%d)" RESET, shown, denom);
-        } else {
-            sprintf(wait_pkt.text, GREEN "Máme dosť hráčov! (%d/%d)" RESET, denom, denom);
-        }
-        memcpy(wait_pkt.lives, ta->game->lives, sizeof(wait_pkt.lives));
-        broadcast(ta->game, &wait_pkt);
     }
     pthread_mutex_unlock(&ta->game->mutex);
 
@@ -172,14 +161,22 @@ void* handle_client(void* arg) {
     memcpy(welcome.lives, ta->game->lives, sizeof(welcome.lives));
     ta->game->ipc.send_packet(ta->fd, &welcome);
 
-    char wait_text[100];
-    sprintf(wait_text, "Čakáme na ďalších hráčov... (%d/%d)", ta->game->connected_players_count, MIN_PLAYERS);
+    // Pošli aktualizáciu o počte hráčov všetkým
+    pthread_mutex_lock(&ta->game->mutex);
+    int denom = MIN_PLAYERS;
+    int shown = ta->game->connected_players_count;
+    if (shown > denom) shown = denom;
+
     GamePacket wait_pkt = {0};
     wait_pkt.MessageType = MSG_UPDATE;
-    strcpy(wait_pkt.text, wait_text);
+    if (ta->game->connected_players_count < MIN_PLAYERS) {
+        sprintf(wait_pkt.text, YELLOW "⏳ Čakáme na ďalších hráčov... (%d/%d)" RESET, shown, denom);
+    } else {
+        sprintf(wait_pkt.text, GREEN "✅ Máme dosť hráčov! (%d/%d)" RESET, shown, denom);
+    }
+    memcpy(wait_pkt.lives, ta->game->lives, sizeof(wait_pkt.lives));
     broadcast(ta->game, &wait_pkt);
 
-    pthread_mutex_lock(&ta->game->mutex);
     if (ta->game->connected_players_count >= MIN_PLAYERS && ta->game->round_active == 0) {
         start_new_round(ta->game);
     }
