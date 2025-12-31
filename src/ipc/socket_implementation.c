@@ -49,7 +49,7 @@ static int s_recv(int fd, GamePacket *p) {
     while (received < total) {
         int res = recv(fd, ptr + received, total - received, 0);
         if (res <= 0) {
-            if (res == 0) return 0;  // Spojenie zatvorené
+            if (res == 0) return 0;
             if (res < 0 && errno == EAGAIN) continue;
             return -1;
         }
@@ -66,17 +66,15 @@ static int s_accept_client(int server_fd) {
     int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
     if (client_fd < 0) {
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            return -1;  // žiadny čakajúci klient (non-blocking)
+            return -1;
         }
         perror("accept");
     }
-    // Voliteľne: nastaviť non-blocking aj na client_fd
-    // fcntl(client_fd, F_SETFL, O_NONBLOCK);
     return client_fd;
 }
 
 static int s_get_write_fd(int read_fd) {
-    return read_fd;  // sockets sú bidirekcionálne
+    return read_fd;
 }
 
 IPC_Interface get_socket_interface() {

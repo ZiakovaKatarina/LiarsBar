@@ -15,6 +15,7 @@ typedef struct ClientThreadArgs {
     int fd;
     IPC_Interface ipc;
     volatile int is_running;
+    volatile bool intentional_quit;
     int player_id;
     int lives[MAX_PLAYERS];
     int current_player_id;
@@ -85,7 +86,11 @@ void* receive_thread(void* arg) {
         int res = args->ipc.receive_packet(args->fd, &pkt);
 
         if (res <= 0) {
-            printf(RED "\n[INFO]: 🔌 Spojenie prerušené." RESET "\n");
+            if (!args->intentional_quit) {
+                printf(RED "\n[INFO]: 🔌 Spojenie prerušené." RESET "\n");
+                printf(CYAN "Stlač Enter pre návrat do hlavného menu..." RESET "\n");
+                getchar();
+            }
             args->is_running = 0;
             break;
         }
@@ -128,7 +133,6 @@ void* receive_thread(void* arg) {
 
                 bool waiting = (args->current_player_id == 0 && args->current_bet_count == 0 && !args->game_started);
                 if (waiting) {
-                    // Zobraz aktualizáciu počtu hráčov
                     printf("%s\n", pkt.text);
                     break;
                 }
@@ -240,7 +244,10 @@ int main() {
                     if (strlen(input) == 0) continue;
 
                     if (strcmp(input, "quit") == 0) {
-                        printf(CYAN "\nNávrat do hlavného menu...\n" RESET);
+                        printf(CYAN "\nOpúšťam hru a vraciam sa do menu...\n" RESET);
+                        args.intentional_quit = true;
+                        GamePacket quit_pkt = { .MessageType = MSG_QUIT };
+                        socket_ipc.send_packet(args.fd, &quit_pkt);
                         args.is_running = 0;
                         socket_ipc.close_conn(args.fd);
                         break;
@@ -278,7 +285,7 @@ int main() {
 
                 pthread_join(recv_tid, NULL);
                 socket_ipc.close_conn(args.fd);
-                printf(CYAN "\nNávrat do hlavného menu...\n\n" RESET);
+                printf(CYAN "Návrat do hlavného menu...\n" RESET);
                 break;
             }
 
@@ -315,7 +322,10 @@ int main() {
                     if (strlen(input) == 0) continue;
 
                     if (strcmp(input, "quit") == 0) {
-                        printf(CYAN "\nNávrat do hlavného menu...\n" RESET);
+                        printf(CYAN "\nOpúšťam hru a vraciam sa do menu...\n" RESET);
+                        args.intentional_quit = true;
+                        GamePacket quit_pkt = { .MessageType = MSG_QUIT };
+                        socket_ipc.send_packet(args.fd, &quit_pkt);
                         args.is_running = 0;
                         socket_ipc.close_conn(args.fd);
                         break;

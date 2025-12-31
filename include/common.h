@@ -10,7 +10,7 @@
 
 #define PORT 8080
 #define MAX_PLAYERS 4
-#define MIN_PLAYERS 2
+#define MIN_PLAYERS 3
 #define INITIAL_LIVES 2
 #define MSG_TEST 99
 
@@ -25,6 +25,7 @@ typedef enum MessageType {
     MSG_START_ROUND,
     MSG_BET,
     MSG_LIAR,
+    MSG_QUIT,
     MSG_UPDATE,
     MSG_GAME_OVER
 } MessageType;

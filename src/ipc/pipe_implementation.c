@@ -1,4 +1,3 @@
-// src/ipc/pipe_implementation.c
 #include "../../include/ipc_interface.h"
 #include "../../include/common.h"
 
@@ -11,13 +10,13 @@
 #include <string.h>
 
 #define SERVER_REG_FIFO "/tmp/liarsbar_server_reg.fifo"
-#define FIFO_S2C "/tmp/liarsbar_s2c_%d.fifo"  // Server → Client
-#define FIFO_C2S "/tmp/liarsbar_c2s_%d.fifo"  // Client → Server
+#define FIFO_S2C "/tmp/liarsbar_s2c_%d.fifo"
+#define FIFO_C2S "/tmp/liarsbar_c2s_%d.fifo"
 
 typedef struct {
     pid_t pid;
-    int c2s_fd;  // server číta od klienta
-    int s2c_fd;  // server píše klientovi
+    int c2s_fd;
+    int s2c_fd;
 } PipeClient;
 
 static struct {
@@ -37,7 +36,6 @@ static int p_init_server() {
     printf("[SERVER] Čakám na prvého klienta pre registráciu...\n");
     fflush(stdout);
 
-    // Blokujúce otvorenie – čaká na prvého klienta
     ctx.reg_fd = open(SERVER_REG_FIFO, O_RDONLY);
     if (ctx.reg_fd < 0) {
         perror("open server_reg (blocking)");
@@ -47,7 +45,6 @@ static int p_init_server() {
     printf("[SERVER] Prvý klient sa zaregistroval, prepínam na non-blocking\n");
     fflush(stdout);
 
-    // Prepnutie na non-blocking pre ďalších klientov
     int flags = fcntl(ctx.reg_fd, F_GETFL);
     fcntl(ctx.reg_fd, F_SETFL, flags | O_NONBLOCK);
 
@@ -87,7 +84,6 @@ static int p_accept_client(int server_fd) {
 
     PipeClient *c = &ctx.clients[ctx.num_clients];
 
-    // Najprv C2S na čítanie (klient už má otvorené na zápis)
     printf("[SERVER] Otváram C2S na čítanie ako prvý: %s\n", c2s_path);
     fflush(stdout);
 
@@ -100,7 +96,6 @@ static int p_accept_client(int server_fd) {
     printf("[SERVER] C2S otvorené (fd=%d)\n", c->c2s_fd);
     fflush(stdout);
 
-    // Potom S2C na zápis
     printf("[SERVER] Otváram S2C na zápis: %s\n", s2c_path);
     fflush(stdout);
 
@@ -161,13 +156,11 @@ static int p_init_client(const char *unused) {
     printf("[CLIENT] PID odoslaný (reg_fd nechávam otvorený)\n");
     fflush(stdout);
 
-    // Dummy open proti ENXIO
     int dummy_c2s = open(c2s_path, O_RDONLY | O_NONBLOCK);
     int dummy_s2c = open(s2c_path, O_WRONLY | O_NONBLOCK);
     printf("[CLIENT] Dummy open vykonaný (na zabránenie ENXIO)\n");
     fflush(stdout);
 
-    // Najprv C2S na zápis
     int c2s_fd = open(c2s_path, O_WRONLY | O_NONBLOCK);
     if (c2s_fd < 0) {
         perror("[CLIENT] open c2s for writing (final)");
@@ -177,7 +170,6 @@ static int p_init_client(const char *unused) {
         goto cleanup;
     }
 
-    // Potom S2C na čítanie
     int s2c_fd = open(s2c_path, O_RDONLY | O_NONBLOCK);
     if (s2c_fd < 0) {
         perror("[CLIENT] open s2c for reading (final)");
@@ -275,7 +267,7 @@ static int p_get_write_fd(int read_fd) {
             return ctx.clients[i].s2c_fd;
         }
     }
-    return -1;  // nemal by sa stať
+    return -1;
 }
 
 IPC_Interface get_pipe_interface() {
