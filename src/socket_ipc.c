@@ -1,5 +1,5 @@
-#include "../../include/ipc_interface.h"
-#include "../../include/common.h"
+#include "../include/ipc_interface.h"
+#include "../include/common.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
