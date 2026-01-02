@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <pthread.h>
+#include <poll.h>
 
 #define SERVER_PATH "./server"
 
@@ -41,8 +42,9 @@ void print_card(int value) {
 void wait_for_enter(void) {
     printf(CYAN "\nStlač Enter pre návrat do hlavného menu... " RESET);
     fflush(stdout);
-    fseek(stdin, 0, SEEK_END);
-    getchar();
+    
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF);
 }
 
 void print_game_state(ClientThreadArgs *args) {
@@ -255,7 +257,8 @@ void* receive_thread(void* arg) {
                 printf(BOLD YELLOW "\n╔════════════════════════════════╗\n");
                 printf("║        🏆 KONIEC HRY 🏆        ║\n");
                 printf("╚════════════════════════════════╝" RESET "\n");
-                printf(GREEN "%s" RESET "\n\n", pkt.text);
+                printf(GREEN "%s" RESET "\n", pkt.text);
+                args->wait_for_enter = true;
                 args->is_running = 0;
                 break;
 
@@ -271,20 +274,30 @@ void game_loop(ClientThreadArgs *args, IPC_Interface ipc) {
     pthread_create(&recv_tid, NULL, receive_thread, args);
 
     char input[256];
+    struct pollfd pfd = { .fd = 0, .events = POLLIN };
+
     while (args->is_running) {
         if (!args->game_started) {
             usleep(100000);
             continue;
         }
 
+        int ret = poll(&pfd, 1, 100);
+        if (ret == 0) {
+            continue;
+        }
+        if (ret < 0) {
+            break;
+        }
+
         if (!fgets(input, sizeof(input), stdin)) {
             args->is_running = 0;
             break;
         }
-
+        
         input[strcspn(input, "\n")] = 0;
         if (strlen(input) == 0) continue;
-        
+
         if (strcmp(input, "quit") == 0) {
             printf(CYAN "\nOpúšťam hru a vraciam sa do menu...\n" RESET);
             args->intentional_quit = true;
@@ -298,19 +311,26 @@ void game_loop(ClientThreadArgs *args, IPC_Interface ipc) {
         GamePacket pkt = parse_bet_input(input);
         if (pkt.MessageType == -1) {
             printf(RED "Nerozumiem príkazu. Skús: '3 K' alebo 'klamar'\n" RESET);
+            if (args->current_player_id == args->player_id) {
+                printf(BLUE "> " RESET);
+                fflush(stdout);
+            }
             continue;
         }
         ipc.send_packet(args->fd, &pkt);
     }
 
+    args->is_running = 0;
     pthread_join(recv_tid, NULL);
 
     if (args->wait_for_enter) {
         wait_for_enter();
         args->wait_for_enter = false;
     }
-    
-    ipc.close_conn(args->fd);
+
+    if (args->fd >= 0) {
+        ipc.close_conn(args->fd);
+    }
     printf(CYAN "\nNávrat do hlavného menu...\n\n" RESET);
 }
 
@@ -338,7 +358,7 @@ void show_rules(void) {
 
 int get_int_input(const char* prompt, int min, int max, int default_val) {
     char formatted_prompt[256];
-    snprintf(formatted_prompt, sizeof(formatted_prompt), prompt, min, max, default_val);
+    snprintf(formatted_prompt, sizeof(formatted_prompt), prompt, default_val, min, max);
     printf(YELLOW "%s" RESET, formatted_prompt);
     fflush(stdout);
     
