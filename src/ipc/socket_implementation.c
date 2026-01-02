@@ -1,27 +1,64 @@
 #include "../../include/ipc_interface.h"
 #include "../../include/common.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <errno.h>
 #include <stdio.h>
-
-#include <errno.h>
+#include <unistd.h>
+#include <string.h>
 
 static int s_init_server() {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
+    if (fd < 0) {
+        perror("socket");
+        return -1;
+    }
+    
     int opt = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    struct sockaddr_in addr = { .sin_family = AF_INET, .sin_addr.s_addr = INADDR_ANY, .sin_port = htons(PORT) };
-    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) return -1;
-    listen(fd, MAX_PLAYERS);
+    
+    struct sockaddr_in addr = {
+        .sin_family = AF_INET,
+        .sin_addr.s_addr = INADDR_ANY,
+        .sin_port = htons(PORT)
+    };
+    
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("bind");
+        return -1;
+    }
+    
+    if (listen(fd, MAX_GAMES) < 0) {
+        perror("listen");
+        return -1;
+    }
+    
     return fd;
 }
 
 static int s_init_client(const char* addr_str) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return -1;
-    struct sockaddr_in addr = { .sin_family = AF_INET, .sin_port = htons(PORT) };
-    inet_pton(AF_INET, addr_str, &addr.sin_addr);
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) return -1;
+    if (fd < 0) {
+        perror("socket");
+        return -1;
+    }
+    
+    struct sockaddr_in addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(PORT)
+    };
+    
+    if (inet_pton(AF_INET, addr_str, &addr.sin_addr) <= 0) {
+        perror("inet_pton");
+        return -1;
+    }
+    
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("connect");
+        return -1;
+    }
+    
     return fd;
 }
 
@@ -33,7 +70,9 @@ static int s_send(int fd, GamePacket *p) {
     while (sent < total) {
         int res = send(fd, ptr + sent, total - sent, 0);
         if (res <= 0) {
-            if (res < 0 && errno == EAGAIN) continue;
+            if (res < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                continue;
+            }
             return -1;
         }
         sent += res;
@@ -50,7 +89,9 @@ static int s_recv(int fd, GamePacket *p) {
         int res = recv(fd, ptr + received, total - received, 0);
         if (res <= 0) {
             if (res == 0) return 0;
-            if (res < 0 && errno == EAGAIN) continue;
+            if (res < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                continue;
+            }
             return -1;
         }
         received += res;
@@ -58,17 +99,22 @@ static int s_recv(int fd, GamePacket *p) {
     return received;
 }
 
-static void s_close(int fd) { close(fd); }
+static void s_close(int fd) {
+    if (fd >= 0) {
+        close(fd);
+    }
+}
 
 static int s_accept_client(int server_fd) {
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
     int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+    
     if (client_fd < 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            return -1;
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            perror("accept");
         }
-        perror("accept");
+        return -1;
     }
     return client_fd;
 }

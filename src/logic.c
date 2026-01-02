@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][INITIAL_LIVES],
+void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][MAX_LIVES],
                           int sockets[MAX_PLAYERS],
                           IPC_Interface ipc,
                           int lives[MAX_PLAYERS],
@@ -38,7 +38,7 @@ void rozdaj_karty_vsetkym(int player_cards[MAX_PLAYERS][INITIAL_LIVES],
             GamePacket pkt = {0};
             pkt.MessageType = MSG_START_ROUND;
             strcpy(pkt.text, "Dostal si nové karty!");
-            for (int i = 0; i < INITIAL_LIVES; i++) {
+            for (int i = 0; i < MAX_LIVES; i++) {
                 pkt.my_cards[i] = -1;
             }
 

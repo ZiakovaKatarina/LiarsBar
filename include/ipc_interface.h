@@ -1,7 +1,7 @@
 #ifndef IPC_INTERFACE_H
 #define IPC_INTERFACE_H
 
-#include "common.h"
+typedef struct GamePacket GamePacket;
 
 typedef struct IPC_Interface {
     int (*init_server)();
