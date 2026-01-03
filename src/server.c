@@ -8,6 +8,9 @@
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
+#include <signal.h>
+#include <errno.h>
+#include <fcntl.h>
 
 typedef struct {
     int game_id;
@@ -38,6 +41,8 @@ typedef struct {
     IPC_Interface server_ipc;
     int next_game_id;
 } ServerState;
+
+static volatile sig_atomic_t server_running = 1;
 
 void init_games(ServerState *state) {
     state->server_ipc = get_socket_interface();
@@ -490,9 +495,18 @@ void* handle_client(void* arg) {
     return NULL;
 }
 
+static void signal_handler(int sig) {
+    (void)sig;
+    server_running = 0;
+    printf(BLUE "\n[SERVER] Zachytený signál – ukončujem...\n" RESET);
+}
+
 int main() {
     srand(time(NULL));
-    
+
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
     ServerState *state = malloc(sizeof(ServerState));
     if (!state) {
         printf(RED "❌ Chyba pri alokácii pamäte.\n" RESET);
@@ -508,13 +522,22 @@ int main() {
         return 1;
     }
 
+    // nastav listening socket na neblokujúci
+    int flags = fcntl(s_fd, F_GETFL, 0);
+    fcntl(s_fd, F_SETFL, flags | O_NONBLOCK);
+
     printf(BLUE "[SERVER]" RESET " " GREEN BOLD "✅ Server beží na porte %d\n" RESET, PORT);
     printf(BLUE "[SERVER]" RESET " " YELLOW "⏳ Čakám na klientov...\n" RESET);
     printf(BLUE "[SERVER]" RESET " " MAGENTA "Max hier: %d | Max hráčov/partiu: %d\n\n" RESET, MAX_GAMES, MAX_PLAYERS);
 
-    while (1) {
+    while (server_running) {
         int c_fd = accept(s_fd, NULL, NULL);
         if (c_fd < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                usleep(50000);  // krátke čakanie
+                continue;
+            }
+            if (errno == EINTR) continue;
             perror("accept");
             continue;
         }
@@ -549,5 +572,6 @@ int main() {
 
     close(s_fd);
     free(state);
+    printf(BLUE "[SERVER] Server korektne ukončený.\n" RESET);
     return 0;
 }
