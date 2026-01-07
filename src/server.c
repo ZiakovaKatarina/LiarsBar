@@ -42,6 +42,8 @@ typedef struct {
     int next_game_id;
 } ServerState;
 
+static volatile sig_atomic_t server_running = 1;
+
 void init_games(ServerState *state) {
     state->server_ipc = get_socket_interface();
     state->next_game_id = 1000;
@@ -491,16 +493,17 @@ void* handle_client(void* arg) {
     return NULL;
 }
 
-void signal_handler(int sig, ServerState *state, int s_fd) {
+static void signal_handler(int sig) {
     (void)sig;
+    server_running = 0;
     printf(BLUE "\n[SERVER] Signal caught – shutting down...\n" RESET);
-    close(s_fd);
-    free(state);
-    exit(0);
 }
 
 int main() {
     srand(time(NULL));
+
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
 
     ServerState *state = malloc(sizeof(ServerState));
     if (!state) {
@@ -524,9 +527,7 @@ int main() {
     printf(BLUE "[SERVER]" RESET " " YELLOW "⏳ Waiting for clients...\n" RESET);
     printf(BLUE "[SERVER]" RESET " " MAGENTA "Max games: %d | Max players/game: %d\n\n" RESET, MAX_GAMES, MAX_PLAYERS);
 
-    volatile sig_atomic_t running = 1;
-    
-    while (running) {
+    while (server_running) {
         int c_fd = accept(s_fd, NULL, NULL);
         if (c_fd < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -567,6 +568,12 @@ int main() {
     }
 
     close(s_fd);
+    
+    pthread_mutex_destroy(&state->global_mutex);
+    for (int i = 0; i < MAX_GAMES; i++) {
+        pthread_mutex_destroy(&state->games[i].mutex);
+    }
+    
     free(state);
     printf(BLUE "[SERVER] Server correctly terminated.\n" RESET);
     return 0;

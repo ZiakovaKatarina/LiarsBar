@@ -49,7 +49,7 @@ void print_game_state(ClientThreadArgs *args) {
     if (args->current_player_id == 0) return;
 
     printf(BOLD BLUE "\n╔════════════════════════════════╗\n");
-    printf("║          📊 GAME STATE          ║\n");
+    printf("║          📊 GAME STATE         ║\n");
     printf("╚════════════════════════════════╝" RESET "\n");
     
     printf(MAGENTA "❤️  Lives:" RESET "\n");
@@ -251,7 +251,7 @@ void* receive_thread(void* arg) {
         if (res <= 0) {
             if (!args->intentional_quit) {
                 printf(RED BOLD "\n╔════════════════════════════════════╗\n");
-                printf("║     ⚠️   SERVER TERMINATED ⚠️       ║\n");
+                printf("║      ⚠️   SERVER TERMINATED ⚠️       ║\n");
                 printf("╚════════════════════════════════════╝" RESET "\n");
                 printf(YELLOW "Connection to server lost.\n");
                 printf("Server was probably shut down or crashed.\n" RESET);
@@ -349,20 +349,29 @@ void show_rules(void) {
     printf(BOLD YELLOW "\n╔══════════════════════════════════════════════════╗\n");
     printf("║              LIAR'S BAR GAME RULES               ║\n");
     printf("╚══════════════════════════════════════════════════╝" RESET "\n");
+
     printf("- Game for " BOLD "2–4 players" RESET " with deck:\n");
-    printf("      → 6× Q (queen),\n      → 6× K (king),\n      → 6× A (ace),\n      → 2× J (" BOLD "joker" RESET ").\n");
-    printf("- Each player starts with " BOLD "3 lives" RESET " (3 cards in hand).\n");
-    printf("- Players take turns betting on " BOLD "total count and value of cards" RESET " on table.\n");
+    printf("      → 6× Q (queen),\n");
+    printf("      → 6× K (king),\n");
+    printf("      → 6× A (ace),\n");
+    printf("      → 2× J (" BOLD "joker" RESET ").\n");
+    printf("- The game creator selects the " BOLD "initial number of lives" RESET "\n");
+    printf("  for all players before the game starts.\n");
+    printf("- Each player starts with a number of cards equal to their\n");
+    printf("  current " BOLD "lives" RESET ".\n");
+    printf("- Players take turns betting on the " BOLD "total count and value of cards" RESET " on table.\n");
     printf("- Example: \"5 K\" = at least 5 kings (including jokers as wildcard).\n");
     printf("- Value order: " BOLD "Q < K < A < J" RESET "\n");
     printf("- " BOLD "Joker (J)" RESET " counts as all values.\n");
     printf("- New bet must be " BOLD "higher" RESET " than previous:\n");
     printf("      → higher count, or\n");
     printf("      → same count and higher value.\n");
-    printf("- Player on turn can either bet or call " BOLD "liar" RESET "\n");
-    printf("- If liar " BOLD "succeeds" RESET " (fewer than bet) → bettor loses life.\n");
-    printf("- If liar " BOLD "fails" RESET " (at least as many) → caller loses life.\n");
-    printf("- After losing life, " BOLD "new cards dealt" RESET " based on current lives.\n");
+    printf("- Bet count " BOLD "cannot be higher" RESET " than the total number of lives\n");
+    printf("  of all players combined.\n");
+    printf("- Player on turn can either bet or call " BOLD "liar" RESET ".\n");
+    printf("- If liar " BOLD "succeeds" RESET " (fewer than bet) → bettor loses one life.\n");
+    printf("- If liar " BOLD "fails" RESET " (at least as many) → caller loses one life.\n");
+    printf("- After losing a life, " BOLD "new cards are dealt" RESET " based on current lives.\n");
     printf("- Game ends when only one player has lives → they win.\n");
     printf("- Command " BOLD "quit" RESET " anytime during game = return to menu.\n\n");
 }
