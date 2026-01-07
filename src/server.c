@@ -42,8 +42,6 @@ typedef struct {
     int next_game_id;
 } ServerState;
 
-static volatile sig_atomic_t server_running = 1;
-
 void init_games(ServerState *state) {
     state->server_ipc = get_socket_interface();
     state->next_game_id = 1000;
@@ -127,20 +125,20 @@ void start_new_round(GameInstance *inst, IPC_Interface ipc) {
     inst->current_bet_value = -1;
     inst->last_bettor = -1;
 
-    inst->current_player = dalsi_hrac(inst->current_player, inst->lives);
+    inst->current_player = next_player(inst->current_player, inst->lives);
 
     if (inst->current_player == -1) {
         inst->round_active = 0;
         return;
     }
     
-    rozdaj_karty_vsetkym(inst->player_cards, inst->sockets, ipc, inst->lives, inst->current_player);
+    deal_cards_to_all(inst->player_cards, inst->sockets, ipc, inst->lives, inst->current_player);
 
-    printf(BLUE "[SERVER %d]" RESET " " YELLOW "🎯 Nové kolo! Začína hráč %d." RESET "\n", 
+    printf(BLUE "[SERVER %d]" RESET " " YELLOW "🎯 New round! Player %d starts." RESET "\n", 
            inst->game_id, inst->current_player + 1);
 
     char msg[128];
-    sprintf(msg, YELLOW "🎯 Nové kolo! Začína hráč %d." RESET, inst->current_player + 1);
+    sprintf(msg, YELLOW "🎯 New round! Player %d starts." RESET, inst->current_player + 1);
     send_game_update(inst, ipc, msg, 0, -1, inst->current_player + 1);
 }
 
@@ -157,7 +155,7 @@ void send_welcome_packet(GameInstance *inst, IPC_Interface ipc,
     welcome.MessageType = MSG_WELCOME;
     welcome.player_id = my_id;
     welcome.game_id = inst->game_id;
-    sprintf(welcome.text, "Vitaj! Si Hráč %d v hre %d.", my_id, inst->game_id);
+    sprintf(welcome.text, "Welcome! You are Player %d in game %d.", my_id, inst->game_id);
     memcpy(welcome.lives, inst->lives, sizeof(welcome.lives));
     ipc.send_packet(ta->fd, &welcome);
 }
@@ -170,9 +168,9 @@ void send_wait_packet(GameInstance *inst, IPC_Interface ipc) {
     wait_pkt.MessageType = MSG_UPDATE;
     wait_pkt.game_id = inst->game_id;
     if (inst->connected_players_count < inst->max_players) {
-        sprintf(wait_pkt.text, YELLOW "⏳ Čakáme na hráčov... (%d/%d)" RESET, shown, inst->max_players);
+        sprintf(wait_pkt.text, YELLOW "⏳ Waiting for players... (%d/%d)" RESET, shown, inst->max_players);
     } else {
-        sprintf(wait_pkt.text, GREEN "✅ Máme dosť hráčov! (%d/%d) – Hra začína!" RESET, shown, inst->max_players);
+        sprintf(wait_pkt.text, GREEN "✅ Enough players! (%d/%d) – Game starts!" RESET, shown, inst->max_players);
     }
     memcpy(wait_pkt.lives, inst->lives, sizeof(inst->lives));
     broadcast(inst, &wait_pkt, ipc);
@@ -180,14 +178,15 @@ void send_wait_packet(GameInstance *inst, IPC_Interface ipc) {
 
 void handle_bet_message(GameInstance *inst, IPC_Interface ipc, 
                        ThreadArgs *ta, int my_id, GamePacket *pkt) {
+    const char* card_names[] = {"Q", "K", "A", "J"};
     int new_count = pkt->count;
     int new_value = pkt->card_value;
 
-    if (!je_vhodna_stávka(inst->current_bet_count, inst->current_bet_value, new_count, new_value)) {
+    if (!is_valid_bet(inst->current_bet_count, inst->current_bet_value, new_count, new_value)) {
         GamePacket err = {0};
         err.MessageType = MSG_UPDATE;
         err.game_id = inst->game_id;
-        sprintf(err.text, RED "❌ Stávka musí byť vyššia!" RESET);
+        sprintf(err.text, RED "❌ Bet must be higher!" RESET);
         memcpy(err.lives, inst->lives, sizeof(err.lives));
         err.current_player_id = inst->current_player + 1;
         err.count = inst->current_bet_count;
@@ -196,13 +195,13 @@ void handle_bet_message(GameInstance *inst, IPC_Interface ipc,
         return;
     }
 
-    int total_cards = spocitaj_celkove_karty(inst->lives);
+    int total_cards = count_total_cards(inst->lives);
     
     if (new_count > total_cards) {
         GamePacket err = {0};
         err.MessageType = MSG_UPDATE;
         err.game_id = inst->game_id;
-        sprintf(err.text, RED "❌ Stávka je vyššia ako celkom kariet (%d)!" RESET, total_cards);
+        sprintf(err.text, RED "❌ Bet is higher than total cards (%d)!" RESET, total_cards);
         memcpy(err.lives, inst->lives, sizeof(err.lives));
         err.current_player_id = inst->current_player + 1;
         err.count = inst->current_bet_count;
@@ -215,29 +214,28 @@ void handle_bet_message(GameInstance *inst, IPC_Interface ipc,
     inst->current_bet_value = new_value;
     inst->last_bettor = my_id;
 
-    const char* card_names[] = {"Q", "K", "A", "J"};
-    printf(BLUE "[SERVER %d]" RESET " " YELLOW "💰 Hráč %d: %d x %s\n" RESET,
+    printf(BLUE "[SERVER %d]" RESET " " YELLOW "💰 Player %d: %d x %s\n" RESET,
            inst->game_id, my_id, new_count, card_names[new_value]);
 
     GamePacket up = {0};
     up.MessageType = MSG_UPDATE;
     up.game_id = inst->game_id;
-    sprintf(up.text, YELLOW "💰 Hráč %d staví: %d x %s" RESET, my_id, new_count, card_names[new_value]);
+    sprintf(up.text, YELLOW "💰 Player %d bets: %d x %s" RESET, my_id, new_count, card_names[new_value]);
     up.count = new_count;
     up.card_value = new_value;
     up.current_player_id = my_id;
     memcpy(up.lives, inst->lives, sizeof(up.lives));
     broadcast(inst, &up, ipc);
 
-    inst->current_player = dalsi_hrac(inst->current_player, inst->lives);
+    inst->current_player = next_player(inst->current_player, inst->lives);
 
     char msg[128];
-    sprintf(msg, CYAN "➡️  Na ťahu: Hráč %d" RESET, inst->current_player + 1);
+    sprintf(msg, CYAN "➡️  Turn: Player %d" RESET, inst->current_player + 1);
     send_game_update(inst, ipc, msg, new_count, new_value, inst->current_player + 1);
 }
 
-void handle_liar_message(GameInstance *inst, IPC_Interface ipc, 
-                        int my_id) {
+void handle_liar_message(GameInstance *inst, IPC_Interface ipc, int my_id) {
+    const char* card_names[] = {"Q", "K", "A", "J"};
     int loser_id = -1;
     bool liar_succeeds = false;
 
@@ -245,12 +243,11 @@ void handle_liar_message(GameInstance *inst, IPC_Interface ipc,
                  inst->current_bet_value, inst->current_bet_count,
                  inst->last_bettor, my_id, &loser_id, &liar_succeeds);
 
-    const char* card_names[] = {"Q", "K", "A", "J"};
-    int total_count = spocitaj_karty(inst->player_cards, inst->lives, inst->current_bet_value);
+    int total_count = count_cards(inst->player_cards, inst->lives, inst->current_bet_value);
 
-    printf(BLUE "[SERVER %d]" RESET " " RED "🎭 Hráč %d VOLÁ KLAMÁR!" RESET "\n", 
+    printf(BLUE "[SERVER %d]" RESET " " RED "🎭 Player %d CALLS LIAR!" RESET "\n", 
            inst->game_id, my_id);
-    printf(BLUE "[SERVER %d]" RESET " " YELLOW "📊 Bolo: %d x %s. Stávka: %d x %s." RESET "\n",
+    printf(BLUE "[SERVER %d]" RESET " " YELLOW "📊 Was: %d x %s. Bet: %d x %s." RESET "\n",
            inst->game_id, total_count, card_names[inst->current_bet_value], 
            inst->current_bet_count, card_names[inst->current_bet_value]);
 
@@ -258,26 +255,26 @@ void handle_liar_message(GameInstance *inst, IPC_Interface ipc,
     result_pkt.MessageType = MSG_UPDATE;
     result_pkt.game_id = inst->game_id;
     if (liar_succeeds) {
-        sprintf(result_pkt.text, GREEN "🎭 Klamár uspel! Bolo len %d x %s. Hráč %d stráca život." RESET,
+        sprintf(result_pkt.text, GREEN "🎭 Liar succeeded! Only %d x %s. Player %d loses life." RESET,
                 total_count, card_names[inst->current_bet_value], loser_id);
     } else {
-        sprintf(result_pkt.text, RED "🎭 Klamár neuspel! Bolo %d x %s. Hráč %d stráca život." RESET,
+        sprintf(result_pkt.text, RED "🎭 Liar failed! Was %d x %s. Player %d loses life." RESET,
                 total_count, card_names[inst->current_bet_value], loser_id);
     }
     memcpy(result_pkt.lives, inst->lives, sizeof(inst->lives));
     broadcast(inst, &result_pkt, ipc);
 
     int alive_count = 0, winner_id = -1;
-    alive_count = zisti_pocet_zivych(inst->lives, &winner_id);
+    alive_count = count_alive_players(inst->lives, &winner_id);
 
     if (alive_count <= 1) {
         GamePacket game_over_pkt = {0};
         game_over_pkt.MessageType = MSG_GAME_OVER;
         game_over_pkt.game_id = inst->game_id;
         if (alive_count == 1) {
-            sprintf(game_over_pkt.text, GREEN "🏆 Hráč %d vyhral partiu!" RESET, winner_id + 1);
+            sprintf(game_over_pkt.text, GREEN "🏆 Player %d won the game!" RESET, winner_id + 1);
         } else {
-            strcpy(game_over_pkt.text, YELLOW "🏁 Hra skončila – všetci hráči vypadli." RESET);
+            strcpy(game_over_pkt.text, YELLOW "🏁 Game ended – all players eliminated." RESET);
         }
         broadcast(inst, &game_over_pkt, ipc);
         inst->round_active = 0;
@@ -287,34 +284,33 @@ void handle_liar_message(GameInstance *inst, IPC_Interface ipc,
     }
 }
 
-void handle_disconnect(GameInstance *inst, IPC_Interface ipc, 
-                      ThreadArgs *ta) {
+void handle_disconnect(GameInstance *inst, IPC_Interface ipc, ThreadArgs *ta) {
     int player_index = ta->player_id - 1;
     inst->sockets[player_index] = -1;
     inst->lives[player_index] = 0;
     inst->connected_players_count--;
     
-    printf(BLUE "[SERVER %d]" RESET " " RED "🔌 Hráč %d odišiel (%d/%d).\n" RESET,
+    printf(BLUE "[SERVER %d]" RESET " " RED "🔌 Player %d left (%d/%d).\n" RESET,
            inst->game_id, ta->player_id, inst->connected_players_count, inst->max_players);
 
     GamePacket disc_pkt = {0};
     disc_pkt.MessageType = MSG_UPDATE;
     disc_pkt.game_id = inst->game_id;
-    sprintf(disc_pkt.text, RED "🔌 Hráč %d opustil hru." RESET, ta->player_id);
+    sprintf(disc_pkt.text, RED "🔌 Player %d left the game." RESET, ta->player_id);
     memcpy(disc_pkt.lives, inst->lives, sizeof(disc_pkt.lives));
     broadcast(inst, &disc_pkt, ipc);
 
     if (inst->round_active && inst->current_player == player_index) {
-        int next_player = dalsi_hrac(inst->current_player, inst->lives);
+        int next_p = next_player(inst->current_player, inst->lives);
 
-        if (next_player == -1 || inst->lives[next_player] <= 0) {
+        if (next_p == -1 || inst->lives[next_p] <= 0) {
             inst->round_active = 0;
         } else {
-            inst->current_player = next_player;
+            inst->current_player = next_p;
             GamePacket turn_pkt = {0};
             turn_pkt.MessageType = MSG_UPDATE;
             turn_pkt.game_id = inst->game_id;
-            sprintf(turn_pkt.text, CYAN "➡️  Na ťahu: Hráč %d" RESET, inst->current_player + 1);
+            sprintf(turn_pkt.text, CYAN "➡️  Turn: Player %d" RESET, inst->current_player + 1);
             turn_pkt.current_player_id = inst->current_player + 1;
             memcpy(turn_pkt.lives, inst->lives, sizeof(turn_pkt.lives));
             broadcast(inst, &turn_pkt, ipc);
@@ -322,16 +318,16 @@ void handle_disconnect(GameInstance *inst, IPC_Interface ipc,
     }
 
     int alive_count = 0, winner_id = -1;
-    alive_count = zisti_pocet_zivych(inst->lives, &winner_id);
+    alive_count = count_alive_players(inst->lives, &winner_id);
 
     if (alive_count <= 1 && inst->round_active) {
         GamePacket game_over_pkt = {0};
         game_over_pkt.MessageType = MSG_GAME_OVER;
         game_over_pkt.game_id = inst->game_id;
         if (alive_count == 1) {
-            sprintf(game_over_pkt.text, GREEN "🏆 Hráč %d vyhral partiu!" RESET, winner_id + 1);
+            sprintf(game_over_pkt.text, GREEN "🏆 Player %d won the game!" RESET, winner_id + 1);
         } else {
-            strcpy(game_over_pkt.text, YELLOW "🏁 Hra skončila – všetci hráči vypadli." RESET);
+            strcpy(game_over_pkt.text, YELLOW "🏁 Game ended – all players eliminated." RESET);
         }
         broadcast(inst, &game_over_pkt, ipc);
         inst->round_active = 0;
@@ -339,7 +335,7 @@ void handle_disconnect(GameInstance *inst, IPC_Interface ipc,
 
     if (inst->connected_players_count == 0) {
         inst->active = false;
-        printf(BLUE "[SERVER]" RESET " " MAGENTA "❌ Partia %d ZATVORENÁ (bez hráčov).\n" RESET, inst->game_id);
+        printf(BLUE "[SERVER]" RESET " " MAGENTA "❌ Game %d CLOSED (no players).\n" RESET, inst->game_id);
     }
 }
 
@@ -355,7 +351,7 @@ void* handle_client(void* arg) {
     GamePacket join_pkt = {0};
     int res = server_ipc.receive_packet(ta->fd, &join_pkt);
     if (res <= 0 || join_pkt.MessageType != MSG_JOIN) {
-        printf(BLUE "[SERVER]" RESET " " RED "❌ Neplatný join packet.\n" RESET);
+        printf(BLUE "[SERVER]" RESET " " RED "❌ Invalid join packet.\n" RESET);
         server_ipc.close_conn(ta->fd);
         free(ta);
         free(args_array);
@@ -369,15 +365,15 @@ void* handle_client(void* arg) {
         instance = create_new_game(state, max_players);
         if (!instance) {
             handle_invalid_join(server_ipc, ta->fd, 
-                              "❌ Server je plný – max 10 hier.");
-            printf(BLUE "[SERVER]" RESET " " RED "❌ Server je plný (max hier = %d).\n" RESET, MAX_GAMES);
+                              "❌ Server is full – max 10 games.");
+            printf(BLUE "[SERVER]" RESET " " RED "❌ Server is full (max games = %d).\n" RESET, MAX_GAMES);
             server_ipc.close_conn(ta->fd);
             free(ta);
             free(args_array);
             return NULL;
         }
 
-        printf(BLUE "[SERVER]" RESET " " GREEN "✨ Vytvorená nová hra: ID %d (max hráčov: %d)\n" RESET,
+        printf(BLUE "[SERVER]" RESET " " GREEN "✨ Created new game: ID %d (max players: %d)\n" RESET,
                instance->game_id, max_players);
     } else {
         instance = find_game(state, requested_game_id);
@@ -385,16 +381,16 @@ void* handle_client(void* arg) {
             GamePacket err = {0};
             err.MessageType = MSG_UPDATE;
             err.game_id = requested_game_id;
-            sprintf(err.text, RED "❌ Hra %d neexistuje." RESET, requested_game_id);
+            sprintf(err.text, RED "❌ Game %d does not exist." RESET, requested_game_id);
             server_ipc.send_packet(ta->fd, &err);
-            printf(BLUE "[SERVER]" RESET " " RED "❌ Hráč chce partiu %d – NEEXISTUJE.\n" RESET, requested_game_id);
+            printf(BLUE "[SERVER]" RESET " " RED "❌ Player wants game %d – DOES NOT EXIST.\n" RESET, requested_game_id);
             server_ipc.close_conn(ta->fd);
             free(ta);
             free(args_array);
             return NULL;
         }
         max_players = instance->max_players;
-        printf(BLUE "[SERVER %d]" RESET " " GREEN "🔗 Hráč sa pripája k existujúcej hre.\n" RESET,
+        printf(BLUE "[SERVER %d]" RESET " " GREEN "🔗 Player joining existing game.\n" RESET,
                instance->game_id);
     }
 
@@ -404,9 +400,9 @@ void* handle_client(void* arg) {
         GamePacket err = {0};
         err.MessageType = MSG_UPDATE;
         err.game_id = instance->game_id;
-        sprintf(err.text, RED "❌ Hra je plná (max %d hráčov)." RESET, instance->max_players);
+        sprintf(err.text, RED "❌ Game is full (max %d players)." RESET, instance->max_players);
         server_ipc.send_packet(ta->fd, &err);
-        printf(BLUE "[SERVER %d]" RESET " " RED "❌ Hra je plná.\n" RESET, instance->game_id);
+        printf(BLUE "[SERVER %d]" RESET " " RED "❌ Game is full.\n" RESET, instance->game_id);
         pthread_mutex_unlock(&instance->mutex);
         server_ipc.close_conn(ta->fd);
         free(ta);
@@ -421,7 +417,7 @@ void* handle_client(void* arg) {
     int initial_lives;
     if (requested_game_id == 0) {
         initial_lives = (join_pkt.count > 0 && join_pkt.count <= 5) ? join_pkt.count : 3;
-        printf(BLUE "[SERVER %d]" RESET " " GREEN "✨ Hra vytvorená s %d životmi.\n" RESET,
+        printf(BLUE "[SERVER %d]" RESET " " GREEN "✨ Game created with %d lives.\n" RESET,
                instance->game_id, initial_lives);
     } else {
         initial_lives = instance->lives[0] > 0 ? instance->lives[0] : 3;
@@ -430,7 +426,7 @@ void* handle_client(void* arg) {
     instance->lives[my_id - 1] = initial_lives;
     ta->player_id = my_id;
 
-    printf(BLUE "[SERVER %d]" RESET " " GREEN "🔗 Hráč %d sa pripojil (%d/%d, životy: %d).\n" RESET,
+    printf(BLUE "[SERVER %d]" RESET " " GREEN "🔗 Player %d connected (%d/%d, lives: %d).\n" RESET,
            instance->game_id, my_id, instance->connected_players_count, instance->max_players, initial_lives);
 
     send_welcome_packet(instance, server_ipc, ta, my_id, initial_lives);
@@ -445,13 +441,13 @@ void* handle_client(void* arg) {
     while (1) {
         res = server_ipc.receive_packet(ta->fd, &pkt);
         if (res <= 0) {
-            printf(BLUE "[SERVER %d]" RESET " " YELLOW "⚠️  Hráč %d: spojenie prerušené.\n" RESET, 
+            printf(BLUE "[SERVER %d]" RESET " " YELLOW "⚠️  Player %d: connection lost.\n" RESET, 
                    instance->game_id, my_id);
             break;
         }
 
         if (pkt.MessageType == MSG_QUIT) {
-            printf(BLUE "[SERVER %d]" RESET " " YELLOW "⚠️  Hráč %d: žiadal disconnect.\n" RESET, 
+            printf(BLUE "[SERVER %d]" RESET " " YELLOW "⚠️  Player %d: requested disconnect.\n" RESET, 
                    instance->game_id, my_id);
             break;
         }
@@ -495,21 +491,20 @@ void* handle_client(void* arg) {
     return NULL;
 }
 
-static void signal_handler(int sig) {
+void signal_handler(int sig, ServerState *state, int s_fd) {
     (void)sig;
-    server_running = 0;
-    printf(BLUE "\n[SERVER] Zachytený signál – ukončujem...\n" RESET);
+    printf(BLUE "\n[SERVER] Signal caught – shutting down...\n" RESET);
+    close(s_fd);
+    free(state);
+    exit(0);
 }
 
 int main() {
     srand(time(NULL));
 
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
-
     ServerState *state = malloc(sizeof(ServerState));
     if (!state) {
-        printf(RED "❌ Chyba pri alokácii pamäte.\n" RESET);
+        printf(RED "❌ Memory allocation error.\n" RESET);
         return 1;
     }
     
@@ -517,24 +512,25 @@ int main() {
 
     int s_fd = state->server_ipc.init_server();
     if (s_fd < 0) {
-        printf(RED "❌ Nepodarilo sa inicializovať server.\n" RESET);
+        printf(RED "❌ Failed to initialize server.\n" RESET);
         free(state);
         return 1;
     }
 
-    // nastav listening socket na neblokujúci
     int flags = fcntl(s_fd, F_GETFL, 0);
     fcntl(s_fd, F_SETFL, flags | O_NONBLOCK);
 
-    printf(BLUE "[SERVER]" RESET " " GREEN BOLD "✅ Server beží na porte %d\n" RESET, PORT);
-    printf(BLUE "[SERVER]" RESET " " YELLOW "⏳ Čakám na klientov...\n" RESET);
-    printf(BLUE "[SERVER]" RESET " " MAGENTA "Max hier: %d | Max hráčov/partiu: %d\n\n" RESET, MAX_GAMES, MAX_PLAYERS);
+    printf(BLUE "[SERVER]" RESET " " GREEN BOLD "✅ Server running on port %d\n" RESET, PORT);
+    printf(BLUE "[SERVER]" RESET " " YELLOW "⏳ Waiting for clients...\n" RESET);
+    printf(BLUE "[SERVER]" RESET " " MAGENTA "Max games: %d | Max players/game: %d\n\n" RESET, MAX_GAMES, MAX_PLAYERS);
 
-    while (server_running) {
+    volatile sig_atomic_t running = 1;
+    
+    while (running) {
         int c_fd = accept(s_fd, NULL, NULL);
         if (c_fd < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                usleep(50000);  // krátke čakanie
+                usleep(50000);
                 continue;
             }
             if (errno == EINTR) continue;
@@ -545,7 +541,7 @@ int main() {
         void **args = malloc(2 * sizeof(void*));
         ThreadArgs *ta = malloc(sizeof(ThreadArgs));
         if (!ta || !args) {
-            printf(RED "❌ Chyba pri alokácii pamäte.\n" RESET);
+            printf(RED "❌ Memory allocation error.\n" RESET);
             close(c_fd);
             free(ta);
             free(args);
@@ -561,7 +557,7 @@ int main() {
 
         pthread_t t;
         if (pthread_create(&t, NULL, handle_client, args) != 0) {
-            printf(RED "❌ Chyba pri vytváraní vlákna.\n" RESET);
+            printf(RED "❌ Thread creation error.\n" RESET);
             free(ta);
             free(args);
             close(c_fd);
@@ -572,6 +568,6 @@ int main() {
 
     close(s_fd);
     free(state);
-    printf(BLUE "[SERVER] Server korektne ukončený.\n" RESET);
+    printf(BLUE "[SERVER] Server correctly terminated.\n" RESET);
     return 0;
 }

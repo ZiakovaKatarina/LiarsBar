@@ -30,19 +30,17 @@ typedef struct ClientThreadArgs {
 } ClientThreadArgs;
 
 void print_card(int value) {
-    switch(value) {
-        case CARD_QUEEN: printf("Q"); break;
-        case CARD_KING: printf("K"); break;
-        case CARD_ACE: printf("A"); break;
-        case CARD_JOKER: printf("J"); break;
-        default: printf("?"); break;
+    const char* symbols[] = {"Q", "K", "A", "J"};
+    if (value >= 0 && value <= 3) {
+        printf("%s", symbols[value]);
+    } else {
+        printf("?");
     }
 }
 
 void wait_for_enter(void) {
-    printf(CYAN "\nStlač Enter pre návrat do hlavného menu... " RESET);
+    printf(CYAN "\nPress Enter to return to main menu... " RESET);
     fflush(stdout);
-    
     int c;
     while ((c = getchar()) != '\n' && c != EOF);
 }
@@ -51,12 +49,13 @@ void print_game_state(ClientThreadArgs *args) {
     if (args->current_player_id == 0) return;
 
     printf(BOLD BLUE "\n╔════════════════════════════════╗\n");
-    printf("║          📊 STAV HRY           ║\n");
+    printf("║          📊 GAME STATE          ║\n");
     printf("╚════════════════════════════════╝" RESET "\n");
-    printf(MAGENTA "❤️  Životy:" RESET "\n");
+    
+    printf(MAGENTA "❤️  Lives:" RESET "\n");
     for (int i = 0; i < MAX_PLAYERS; i++) {
         if (args->lives[i] > 0 || i + 1 == args->player_id) {
-            printf("   Hráč %d: ", i + 1);
+            printf("   Player %d: ", i + 1);
             for (int j = 0; j < args->lives[i]; j++) printf(RED "❤️ " RESET);
             printf(MAGENTA " (%d)" RESET "\n", args->lives[i]);
         }
@@ -64,19 +63,19 @@ void print_game_state(ClientThreadArgs *args) {
     printf("\n");
 
     if (args->current_bet_count > 0) {
-        printf(YELLOW "💰 Aktuálna stávka: %d x ", args->current_bet_count);
+        printf(YELLOW "💰 Current bet: %d x ", args->current_bet_count);
         print_card(args->current_bet_value);
         printf(RESET "\n");
     }
 
-    printf(CYAN "➡️  Na ťahu:  Hráč %d" RESET, args->current_player_id);
+    printf(CYAN "➡️  Turn:  Player %d" RESET, args->current_player_id);
     if (args->current_player_id == args->player_id) {
-        printf(RED " " BOLD "◄── TY!" RESET "\n");
+        printf(RED " " BOLD "◄── YOU!" RESET "\n");
     } else {
         printf("\n");
     }
 
-    printf(GREEN "📋 Tvoje karty: " RESET);
+    printf(GREEN "📋 Your cards: " RESET);
     for (int i = 0; i < MAX_LIVES; i++) {
         if (args->my_cards[i] >= 0) {
             printf(GREEN);
@@ -91,37 +90,36 @@ void init_client_args(ClientThreadArgs *args, IPC_Interface ipc) {
     memset(args, 0, sizeof(ClientThreadArgs));
     args->ipc = ipc;
     args->is_running = 1;
-    args->game_started = false;
-    args->wait_for_enter = false;
-    args->last_current_player_id = 0;
     args->fd = -1;
 }
 
 GamePacket parse_bet_input(const char* input) {
     GamePacket pkt = {0};
     
-    if (strcasecmp(input, "klamar") == 0) {
+    if (strcasecmp(input, "liar") == 0) {
         pkt.MessageType = MSG_LIAR;
         return pkt;
     }
     
     int count;
     char card_char;
-    if (sscanf(input, "%d %c", &count, &card_char) == 2) {
-        int value = -1;
-        switch(toupper(card_char)) {
-            case 'Q': value = CARD_QUEEN; break;
-            case 'K': value = CARD_KING; break;
-            case 'A': value = CARD_ACE; break;
-            case 'J': value = CARD_JOKER; break;
-        }
-        if (value != -1 && count > 0) {
-            pkt.MessageType = MSG_BET;
-            pkt.count = count;
-            pkt.card_value = value;
-        } else {
-            pkt.MessageType = -1;
-        }
+    if (sscanf(input, "%d %c", &count, &card_char) != 2) {
+        pkt.MessageType = -1;
+        return pkt;
+    }
+    
+    int value = -1;
+    switch(toupper(card_char)) {
+        case 'Q': value = CARD_QUEEN; break;
+        case 'K': value = CARD_KING; break;
+        case 'A': value = CARD_ACE; break;
+        case 'J': value = CARD_JOKER; break;
+    }
+    
+    if (value != -1 && count > 0) {
+        pkt.MessageType = MSG_BET;
+        pkt.count = count;
+        pkt.card_value = value;
     } else {
         pkt.MessageType = -1;
     }
@@ -132,13 +130,11 @@ void start_server_if_needed(ClientThreadArgs *args, IPC_Interface ipc) {
     args->fd = ipc.init_client("127.0.0.1");
     
     if (args->fd < 0) {
-        printf(YELLOW "⚠️  Server nebeží - spúšťam ho automaticky...\n" RESET);
+        printf(YELLOW "⚠️  Server not running - starting automatically...\n" RESET);
         
         if (system(SERVER_PATH " &") == -1) {
-            printf(RED "❌ Nepodarilo sa spustiť server!\n" RESET);
-            printf(YELLOW "Skús spustiť server manuálne:\n" RESET);
-            printf(YELLOW "   ./server\n\n" RESET);
-            args->fd = -1;
+            printf(RED "❌ Failed to start server!\n" RESET);
+            printf(YELLOW "Try starting server manually:\n   ./server\n\n" RESET);
             return;
         }
         
@@ -146,14 +142,103 @@ void start_server_if_needed(ClientThreadArgs *args, IPC_Interface ipc) {
             usleep(200000);
             args->fd = ipc.init_client("127.0.0.1");
         }
+        
         if (args->fd < 0) {
-            printf(RED "❌ Stále sa nedá pripojiť k serveru.\n" RESET);
-            printf(YELLOW "Skús to znova alebo spusti server manuálne.\n\n" RESET);
+            printf(RED "❌ Still cannot connect to server.\n" RESET);
+            printf(YELLOW "Try again or start server manually.\n\n" RESET);
             return;
         }
     }
 
-    printf(CYAN "✅ Pripojené k serveru.\n" RESET);
+    printf(CYAN "✅ Connected to server.\n" RESET);
+}
+
+void handle_message_welcome(ClientThreadArgs *args, GamePacket *pkt) {
+    args->player_id = pkt->player_id;
+    args->game_id = pkt->game_id;
+    memcpy(args->lives, pkt->lives, sizeof(pkt->lives));
+    printf(CYAN "[SERVER]: 🎮 Welcome! You are Player %d in game %d." RESET "\n", 
+           pkt->player_id, pkt->game_id);
+}
+
+void handle_message_start_round(ClientThreadArgs *args, GamePacket *pkt) {
+    args->game_started = true;
+    printf(YELLOW "\n╔════════════════════════════════╗\n");
+    printf("║        🎯 NEW ROUND 🎯         ║\n");
+    printf("╚════════════════════════════════╝" RESET "\n");
+    printf(GREEN "📋 Your cards: " RESET);
+    
+    for(int i = 0; i < MAX_LIVES; i++) {
+        if (pkt->my_cards[i] >= 0) {
+            printf(GREEN);
+            print_card(pkt->my_cards[i]);
+            printf(" " RESET);
+        }
+    }
+    printf("\n");
+
+    memcpy(args->lives, pkt->lives, sizeof(pkt->lives));
+    memcpy(args->my_cards, pkt->my_cards, sizeof(pkt->my_cards));
+    args->current_player_id = pkt->current_player_id;
+    args->last_current_player_id = 0;
+    args->current_bet_count = 0;
+    args->current_bet_value = -1;
+}
+
+void handle_message_update(ClientThreadArgs *args, GamePacket *pkt) {
+    memcpy(args->lives, pkt->lives, sizeof(pkt->lives));
+    
+    if (pkt->current_player_id != 0) {
+        args->current_player_id = pkt->current_player_id;
+    }
+    if (pkt->count > 0) {
+        args->current_bet_count = pkt->count;
+        args->current_bet_value = pkt->card_value;
+    }
+
+    bool is_fatal_error = (strstr(pkt->text, "not exist") != NULL) ||
+                          (strstr(pkt->text, "full") != NULL) ||
+                          (strstr(pkt->text, "Server is full") != NULL);
+
+    if (strstr(pkt->text, "❌") != NULL && is_fatal_error) {
+        printf(RED "%s\n" RESET, pkt->text);
+        args->wait_for_enter = true;
+        args->is_running = 0;
+        return;
+    }
+
+    bool waiting = (args->current_player_id == 0 && 
+                   args->current_bet_count == 0 && 
+                   !args->game_started);
+    if (waiting) {
+        printf("%s\n", pkt->text);
+        return;
+    }
+
+    printf(BLUE "[UPDATE]: %s" RESET "\n", pkt->text);
+
+    if (args->current_player_id != args->last_current_player_id && 
+        args->current_player_id != 0) {
+        print_game_state(args);
+        args->last_current_player_id = args->current_player_id;
+        if (args->current_player_id == args->player_id) {
+            printf(BLUE "> " RESET);
+            fflush(stdout);
+        }
+    } else if (strstr(pkt->text, "❌") != NULL && 
+               args->current_player_id == args->player_id) {
+        printf(BLUE "> " RESET);
+        fflush(stdout);
+    }
+}
+
+void handle_message_game_over(ClientThreadArgs *args, GamePacket *pkt) {
+    printf(BOLD YELLOW "\n╔════════════════════════════════╗\n");
+    printf("║        🏆 GAME OVER 🏆         ║\n");
+    printf("╚════════════════════════════════╝" RESET "\n");
+    printf(GREEN "%s" RESET "\n", pkt->text);
+    args->wait_for_enter = true;
+    args->is_running = 0;
 }
 
 void* receive_thread(void* arg) {
@@ -166,12 +251,11 @@ void* receive_thread(void* arg) {
         if (res <= 0) {
             if (!args->intentional_quit) {
                 printf(RED BOLD "\n╔════════════════════════════════════╗\n");
-                printf("║     ⚠️   SERVER BOL UKONČENÝ ⚠️      ║\n");
+                printf("║     ⚠️   SERVER TERMINATED ⚠️       ║\n");
                 printf("╚════════════════════════════════════╝" RESET "\n");
-                printf(YELLOW "Spojenie so serverom bolo prerušené.\n");
-                printf("Server bol pravdepodobne vypnutý alebo spadol.\n" RESET);
+                printf(YELLOW "Connection to server lost.\n");
+                printf("Server was probably shut down or crashed.\n" RESET);
                 fflush(stdout);
-
                 args->wait_for_enter = true;
             }
             args->is_running = 0;
@@ -180,88 +264,17 @@ void* receive_thread(void* arg) {
 
         switch(pkt.MessageType) {
             case MSG_WELCOME:
-                args->player_id = pkt.player_id;
-                args->game_id = pkt.game_id;
-                memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
-                printf(CYAN "[SERVER]: 🎮 Vitaj! Si Hráč %d v hre %d." RESET "\n", pkt.player_id, pkt.game_id);
+                handle_message_welcome(args, &pkt);
                 break;
-
             case MSG_START_ROUND:
-                args->game_started = true;
-                printf(YELLOW "\n╔════════════════════════════════╗\n");
-                printf("║        🎯 NOVÉ KOLO 🎯         ║\n");
-                printf("╚════════════════════════════════╝" RESET "\n");
-                printf(GREEN "📋 Tvoje karty: " RESET);
-                for(int i = 0; i < MAX_LIVES; i++) {
-                    if (pkt.my_cards[i] >= 0) {
-                        printf(GREEN);
-                        print_card(pkt.my_cards[i]);
-                        printf(" " RESET);
-                    }
-                }
-                printf("\n");
-
-                memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
-                memcpy(args->my_cards, pkt.my_cards, sizeof(pkt.my_cards));
-                args->current_player_id = pkt.current_player_id;
-                args->last_current_player_id = 0;
-                args->current_bet_count = 0;
-                args->current_bet_value = -1;
+                handle_message_start_round(args, &pkt);
                 break;
-
-            case MSG_UPDATE: {
-                memcpy(args->lives, pkt.lives, sizeof(pkt.lives));
-                
-                if (pkt.current_player_id != 0) {
-                    args->current_player_id = pkt.current_player_id;
-                }
-                if (pkt.count > 0) {
-                    args->current_bet_count = pkt.count;
-                    args->current_bet_value = pkt.card_value;
-                }
-
-                bool is_fatal_error = (strstr(pkt.text, "neexistuje") != NULL) ||
-                                      (strstr(pkt.text, "plná") != NULL) ||
-                                      (strstr(pkt.text, "Server je plný") != NULL);
-
-                if (strstr(pkt.text, "❌") != NULL && is_fatal_error) {
-                    printf(RED "%s\n" RESET, pkt.text);
-                    args->wait_for_enter = true;
-                    args->is_running = 0;
-                    break;
-                }
-
-                bool waiting = (args->current_player_id == 0 && args->current_bet_count == 0 && !args->game_started);
-                if (waiting) {
-                    printf("%s\n", pkt.text);
-                    break;
-                }
-
-                printf(BLUE "[UPDATE]: %s" RESET "\n", pkt.text);
-
-                if (args->current_player_id != args->last_current_player_id && args->current_player_id != 0) {
-                    print_game_state(args);
-                    args->last_current_player_id = args->current_player_id;
-                    if (args->current_player_id == args->player_id) {
-                        printf(BLUE "> " RESET);
-                        fflush(stdout);
-                    }
-                } else if (strstr(pkt.text, "❌") != NULL && args->current_player_id == args->player_id) {
-                    printf(BLUE "> " RESET);
-                    fflush(stdout);
-                }
+            case MSG_UPDATE:
+                handle_message_update(args, &pkt);
                 break;
-            }
-
             case MSG_GAME_OVER:
-                printf(BOLD YELLOW "\n╔════════════════════════════════╗\n");
-                printf("║        🏆 KONIEC HRY 🏆        ║\n");
-                printf("╚════════════════════════════════╝" RESET "\n");
-                printf(GREEN "%s" RESET "\n", pkt.text);
-                args->wait_for_enter = true;
-                args->is_running = 0;
+                handle_message_game_over(args, &pkt);
                 break;
-
             default:
                 break;
         }
@@ -283,11 +296,9 @@ void game_loop(ClientThreadArgs *args, IPC_Interface ipc) {
         }
 
         int ret = poll(&pfd, 1, 100);
-        if (ret == 0) {
+        if (ret <= 0) {
+            if (ret < 0) break;
             continue;
-        }
-        if (ret < 0) {
-            break;
         }
 
         if (!fgets(input, sizeof(input), stdin)) {
@@ -299,7 +310,7 @@ void game_loop(ClientThreadArgs *args, IPC_Interface ipc) {
         if (strlen(input) == 0) continue;
 
         if (strcmp(input, "quit") == 0) {
-            printf(CYAN "\nOpúšťam hru a vraciam sa do menu...\n" RESET);
+            printf(CYAN "\nLeaving game and returning to menu...\n" RESET);
             args->intentional_quit = true;
             GamePacket quit_pkt = {.MessageType = MSG_QUIT};
             ipc.send_packet(args->fd, &quit_pkt);
@@ -310,7 +321,7 @@ void game_loop(ClientThreadArgs *args, IPC_Interface ipc) {
 
         GamePacket pkt = parse_bet_input(input);
         if (pkt.MessageType == -1) {
-            printf(RED "Nerozumiem príkazu. Skús: '3 K' alebo 'klamar'\n" RESET);
+            printf(RED "Invalid command. Try: '3 K' or 'liar'\n" RESET);
             if (args->current_player_id == args->player_id) {
                 printf(BLUE "> " RESET);
                 fflush(stdout);
@@ -331,29 +342,29 @@ void game_loop(ClientThreadArgs *args, IPC_Interface ipc) {
     if (args->fd >= 0) {
         ipc.close_conn(args->fd);
     }
-    printf(CYAN "\nNávrat do hlavného menu...\n\n" RESET);
+    printf(CYAN "\nReturning to main menu...\n\n" RESET);
 }
 
 void show_rules(void) {
     printf(BOLD YELLOW "\n╔══════════════════════════════════════════════════╗\n");
-    printf("║              PRAVIDLÁ HRY LIAR'S BAR             ║\n");
+    printf("║              LIAR'S BAR GAME RULES               ║\n");
     printf("╚══════════════════════════════════════════════════╝" RESET "\n");
-    printf("- Hra pre " BOLD "2–4 hráčov" RESET " s balíčkom:\n");
-    printf("      → 6× Q (kráľovná),\n      → 6× K (kráľ),\n      → 6× A (eso),\n      → 2× J (" BOLD "žolík" RESET ").\n");
-    printf("- Každý hráč začína s " BOLD "3 životmi" RESET " (3 karty v ruke).\n");
-    printf("- Hráči sa striedajú v stávkach na " BOLD "celkový počet a hodnotu kariet" RESET " na stole.\n");
-    printf("- Príklad: \"5 K\" = aspoň 5 kráľov (vrátane žolíkov ako wildcard).\n");
-    printf("- Poradie hodnôt: " BOLD "Q < K < A < J" RESET "\n");
-    printf("- " BOLD "Žolík (J)" RESET " sa ráta ku všetkým hodnotám.\n");
-    printf("- Nová stávka musí byť " BOLD "vyššia" RESET " ako predchádzajúca:\n");
-    printf("      → väčší počet, alebo\n");
-    printf("      → rovnaký počet a vyššia hodnota.\n");
-    printf("- Hráč na ťahu môže buď stávkovať, alebo zavolať " BOLD "klamar" RESET "\n");
-    printf("- Ak klamár " BOLD "uspeje" RESET " (bolo menej ako stávka) → stávkujúci stráca život.\n");
-    printf("- Ak klamár " BOLD "neuspeje" RESET " (bolo aspoň toľko) → klamár stráca život.\n");
-    printf("- Po strate života sa " BOLD "rozdajú nové karty" RESET " podľa aktuálnych životov.\n");
-    printf("- Hra končí, keď ostane len jeden hráč s životmi → ten vyhrá.\n");
-    printf("- Príkaz " BOLD "quit" RESET " kedykoľvek počas hry = návrat do menu.\n\n");
+    printf("- Game for " BOLD "2–4 players" RESET " with deck:\n");
+    printf("      → 6× Q (queen),\n      → 6× K (king),\n      → 6× A (ace),\n      → 2× J (" BOLD "joker" RESET ").\n");
+    printf("- Each player starts with " BOLD "3 lives" RESET " (3 cards in hand).\n");
+    printf("- Players take turns betting on " BOLD "total count and value of cards" RESET " on table.\n");
+    printf("- Example: \"5 K\" = at least 5 kings (including jokers as wildcard).\n");
+    printf("- Value order: " BOLD "Q < K < A < J" RESET "\n");
+    printf("- " BOLD "Joker (J)" RESET " counts as all values.\n");
+    printf("- New bet must be " BOLD "higher" RESET " than previous:\n");
+    printf("      → higher count, or\n");
+    printf("      → same count and higher value.\n");
+    printf("- Player on turn can either bet or call " BOLD "liar" RESET "\n");
+    printf("- If liar " BOLD "succeeds" RESET " (fewer than bet) → bettor loses life.\n");
+    printf("- If liar " BOLD "fails" RESET " (at least as many) → caller loses life.\n");
+    printf("- After losing life, " BOLD "new cards dealt" RESET " based on current lives.\n");
+    printf("- Game ends when only one player has lives → they win.\n");
+    printf("- Command " BOLD "quit" RESET " anytime during game = return to menu.\n\n");
 }
 
 int get_int_input(const char* prompt, int min, int max, int default_val) {
@@ -371,14 +382,14 @@ int get_int_input(const char* prompt, int min, int max, int default_val) {
     int value = atoi(line);
     if (value >= min && value <= max) {
         return value;
-    } else {
-        printf(YELLOW "⚠️  Neplatná hodnota, použijem predvolené (%d).\n" RESET, default_val);
-        return default_val;
     }
+    
+    printf(YELLOW "⚠️  Invalid value, using default (%d).\n" RESET, default_val);
+    return default_val;
 }
 
 char* get_game_id_input(void) {
-    printf(YELLOW "Zadaj ID partie (alebo 'quit' pre návrat): " RESET);
+    printf(YELLOW "Enter game ID (or 'quit' to return): " RESET);
     fflush(stdout);
     
     static char id_line[20];
@@ -393,16 +404,16 @@ void handle_new_game(IPC_Interface ipc) {
     init_client_args(&args, ipc);
     
     int max_players = get_int_input(
-        "\n👥 Koľko hráčov? (predvolené: %d, min: %d, max: %d): ",
+        "\n👥 How many players? (default: %d, min: %d, max: %d): ",
         MIN_PLAYERS, MAX_PLAYERS, MAX_PLAYERS
     );
-    printf(GREEN "✓ Hra pre %d hráčov.\n" RESET, max_players);
+    printf(GREEN "✓ Game for %d players.\n" RESET, max_players);
 
     int initial_lives = get_int_input(
-        "💚 Koľko životov na začiatku? (predvolené: %d, min: %d, max: %d): ",
+        "💚 How many lives at start? (default: %d, min: %d, max: %d): ",
         1, MAX_LIVES, 3
     );
-    printf(GREEN "✓ Hra začne s %d životmi pre každého hráča.\n\n" RESET, initial_lives);
+    printf(GREEN "✓ Game will start with %d lives per player.\n\n" RESET, initial_lives);
 
     start_server_if_needed(&args, ipc);
     if (args.fd < 0) return;
@@ -410,26 +421,26 @@ void handle_new_game(IPC_Interface ipc) {
     GamePacket join_pkt = {.MessageType = MSG_JOIN, .game_id = 0};
     join_pkt.count = initial_lives;
     join_pkt.player_id = max_players;
-    strcpy(join_pkt.text, "Som hostiteľ");
+    strcpy(join_pkt.text, "I am host");
     ipc.send_packet(args.fd, &join_pkt);
 
     game_loop(&args, ipc);
 }
 
 void handle_join_game(IPC_Interface ipc) {
-    printf(GREEN "Pripájam sa k hre...\n" RESET);
+    printf(GREEN "Joining game...\n" RESET);
     
     char* id_line = get_game_id_input();
     if (!id_line) return;
     
     if (strcmp(id_line, "quit") == 0 || strcmp(id_line, "q") == 0) {
-        printf(CYAN "Návrat do hlavného menu...\n\n" RESET);
+        printf(CYAN "Returning to main menu...\n\n" RESET);
         return;
     }
     
     int game_id = atoi(id_line);
     if (game_id <= 0) {
-        printf(RED "❌ Neplatné ID (musí byť > 0 alebo 'quit').\n\n" RESET);
+        printf(RED "❌ Invalid ID (must be > 0 or 'quit').\n\n" RESET);
         return;
     }
 
@@ -438,13 +449,13 @@ void handle_join_game(IPC_Interface ipc) {
 
     args.fd = ipc.init_client("127.0.0.1");
     if (args.fd < 0) {
-        printf(RED "❌ Nepodarilo sa pripojiť k serveru.\n\n" RESET);
+        printf(RED "❌ Failed to connect to server.\n\n" RESET);
         return;
     }
     
     GamePacket join_pkt = {.MessageType = MSG_JOIN, .game_id = game_id};
     join_pkt.count = 0;
-    strcpy(join_pkt.text, "Pripojil som sa");
+    strcpy(join_pkt.text, "I joined");
     ipc.send_packet(args.fd, &join_pkt);
     
     game_loop(&args, ipc);
@@ -459,11 +470,11 @@ int main() {
         printf("╚════════════════════════════════╝" RESET "\n");
 
         printf(BOLD "Menu:" RESET "\n");
-        printf(YELLOW "1." RESET " Nová hra\n");
-        printf(YELLOW "2." RESET " Pripojenie k hre\n");
-        printf(YELLOW "3." RESET " Koniec\n");
-        printf(YELLOW "4." RESET " Pravidlá hry\n\n");
-        printf(BLUE "Voľba: " RESET);
+        printf(YELLOW "1." RESET " New game\n");
+        printf(YELLOW "2." RESET " Join game\n");
+        printf(YELLOW "3." RESET " Exit\n");
+        printf(YELLOW "4." RESET " Game rules\n\n");
+        printf(BLUE "Choice: " RESET);
         fflush(stdout);
 
         char line[10];
@@ -473,21 +484,17 @@ int main() {
             case '1':
                 handle_new_game(socket_ipc);
                 break;
-
             case '2':
                 handle_join_game(socket_ipc);
                 break;
-
             case '3':
-                printf(CYAN "Ádiós!\n" RESET);
+                printf(CYAN "Goodbye!\n" RESET);
                 return 0;
-
             case '4':
                 show_rules();
                 break;
-
             default:
-                printf(RED "Neplatná voľba.\n" RESET);
+                printf(RED "Invalid choice.\n" RESET);
                 break;
         }
     }
