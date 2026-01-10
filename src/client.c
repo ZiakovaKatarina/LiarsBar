@@ -225,7 +225,7 @@ void handle_message_update(ClientThreadArgs *args, GamePacket *pkt) {
             printf(BLUE "> " RESET);
             fflush(stdout);
         }
-    } else if (strstr(pkt->text, "❌") != NULL && 
+    } else if (strstr(pkt->text, "❌ Bet") != NULL && 
                args->current_player_id == args->player_id) {
         printf(BLUE "> " RESET);
         fflush(stdout);

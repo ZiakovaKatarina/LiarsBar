@@ -51,7 +51,7 @@ void init_games(ServerState *state) {
     
     for (int i = 0; i < MAX_GAMES; i++) {
         state->games[i].active = false;
-        state->games[i].game_id = 0;
+        state->games[i].game_id = i;
         state->games[i].max_players = MAX_PLAYERS;
         pthread_mutex_init(&state->games[i].mutex, NULL);
         for (int j = 0; j < MAX_PLAYERS; j++) {
@@ -67,7 +67,7 @@ GameInstance* create_new_game(ServerState *state, int max_players) {
         if (!state->games[i].active) {
             memset(&state->games[i], 0, sizeof(GameInstance));
             state->games[i].active = true;
-            state->games[i].game_id = state->next_game_id++;
+            state->games[i].game_id = i;
             state->games[i].max_players = max_players;
             state->games[i].connected_players_count = 0;
             state->games[i].round_active = 0;
@@ -126,6 +126,12 @@ void start_new_round(GameInstance *inst, IPC_Interface ipc) {
     inst->current_bet_count = 0;
     inst->current_bet_value = -1;
     inst->last_bettor = -1;
+
+    for (int p = 0; p < MAX_PLAYERS; p++) {
+        for (int c = 0; c < 5; c++) {
+            inst->player_cards[p][c] = -1;
+        }
+    }
 
     inst->current_player = next_player(inst->current_player, inst->lives);
 
@@ -238,12 +244,53 @@ void handle_bet_message(GameInstance *inst, IPC_Interface ipc,
 
 void handle_liar_message(GameInstance *inst, IPC_Interface ipc, int my_id) {
     const char* card_names[] = {"Q", "K", "A", "J"};
+    
+    if (inst->current_bet_count == 0 || inst->current_bet_value == -1) {
+        printf(BLUE "[SERVER %d]" RESET " " RED "❌ Player %d called LIAR with no bet – loses life!\n" RESET, 
+               inst->game_id, my_id);
+        
+        if (my_id > 0 && my_id <= MAX_PLAYERS) {
+            inst->lives[my_id - 1]--;
+        }
+        
+        GamePacket result_pkt = {0};
+        result_pkt.MessageType = MSG_UPDATE;
+        result_pkt.game_id = inst->game_id;
+        sprintf(result_pkt.text, RED "❌ Player %d called LIAR with no bet – loses a life!" RESET, my_id);
+        memcpy(result_pkt.lives, inst->lives, sizeof(inst->lives));
+        broadcast(inst, &result_pkt, ipc);
+        
+        int alive_count = 0, winner_id = -1;
+        alive_count = count_alive_players(inst->lives, &winner_id);
+        
+        if (alive_count <= 1) {
+            GamePacket game_over_pkt = {0};
+            game_over_pkt.MessageType = MSG_GAME_OVER;
+            game_over_pkt.game_id = inst->game_id;
+            if (alive_count == 1) {
+                sprintf(game_over_pkt.text, GREEN "🏆 Player %d won the game!" RESET, winner_id + 1);
+            } else {
+                strcpy(game_over_pkt.text, YELLOW "🏁 Game ended – all players eliminated." RESET);
+            }
+            broadcast(inst, &game_over_pkt, ipc);
+            inst->round_active = 0;
+        } else {
+            inst->round_active = 0;
+            start_new_round(inst, ipc);
+        }
+        return;
+    }
+    
     int loser_id = -1;
     bool liar_succeeds = false;
 
     evaluate_liar(inst->player_cards, inst->lives, 
                  inst->current_bet_value, inst->current_bet_count,
                  inst->last_bettor, my_id, &loser_id, &liar_succeeds);
+
+    if (loser_id > 0 && loser_id <= MAX_PLAYERS) {
+        inst->lives[loser_id - 1]--;
+    }
 
     int total_count = count_cards(inst->player_cards, inst->lives, inst->current_bet_value);
 

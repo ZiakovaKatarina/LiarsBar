@@ -67,8 +67,9 @@ int count_cards(int player_cards[MAX_PLAYERS][MAX_LIVES],
     for (int p = 0; p < MAX_PLAYERS; p++) {
         if (lives[p] > 0) {
             for (int c = 0; c < lives[p]; c++) {
-                if (player_cards[p][c] == target_value || 
-                    player_cards[p][c] == CARD_JOKER) {
+                if (player_cards[p][c] >= 0 && 
+                    (player_cards[p][c] == target_value || 
+                     player_cards[p][c] == 3)) {
                     total_count++;
                 }
             }
@@ -120,8 +121,4 @@ void evaluate_liar(int player_cards[MAX_PLAYERS][MAX_LIVES],
     int total_count = count_cards(player_cards, lives, called_value);
     *liar_succeeds = (total_count < bet_count);
     *loser_id = *liar_succeeds ? last_bettor : caller_id;
-    
-    if (*loser_id > 0 && *loser_id <= MAX_PLAYERS) {
-        lives[*loser_id - 1]--;
-    }
 }
