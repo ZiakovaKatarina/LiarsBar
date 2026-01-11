@@ -9,35 +9,29 @@
 #include "../include/ipc_interface.h"
 #include "../include/server_game.h"
 
-// Globálny stav servera (zoznam hier)
 typedef struct {
     ServerGame games[MAX_GAMES];
-    pthread_mutex_t mutex;  // Chráni zoznam hier pri vytváraní novej
+    pthread_mutex_t mutex;
     IPC_Interface ipc;
     volatile int running;
 } ServerState;
 
 ServerState g_server;
 
-// Štruktúra pre argumenty vlákna
 typedef struct {
     int client_fd;
 } ClientThreadArgs;
 
-// --- Helper: Nájdenie alebo vytvorenie hry ---
-// Pridaný parameter 'requested_lives' - použije sa LEN ak vytvárame novú hru
 ServerGame* find_or_create_game(int game_id, int max_players,
                                 int requested_lives) {
     pthread_mutex_lock(&g_server.mutex);
 
     ServerGame* target_game = NULL;
 
-    // A) Vytvorenie novej hry
     if (game_id == 0) {
         for (int i = 0; i < MAX_GAMES; i++) {
             if (!g_server.games[i].is_running) {
                 int new_id = 1000 + i;
-                // Tu odovzdáme requested_lives do konfigurácie hry
                 game_init(&g_server.games[i], new_id, max_players,
                           requested_lives, g_server.ipc);
                 target_game = &g_server.games[i];
@@ -46,9 +40,7 @@ ServerGame* find_or_create_game(int game_id, int max_players,
                 break;
             }
         }
-    }
-    // B) Pripojenie k existujúcej hre
-    else {
+    } else {
         for (int i = 0; i < MAX_GAMES; i++) {
             if (g_server.games[i].is_running &&
                 g_server.games[i].game_id == game_id) {
@@ -62,7 +54,6 @@ ServerGame* find_or_create_game(int game_id, int max_players,
     return target_game;
 }
 
-// --- Vlákno pre obsluhu klienta ---
 void* client_handler(void* arg) {
     ClientThreadArgs* args = (ClientThreadArgs*)arg;
     int fd = args->client_fd;
@@ -77,12 +68,9 @@ void* client_handler(void* arg) {
     }
 
     int requested_gid = pkt.game_id;
-    // Ak klient neposlal počet životov (napr. pri Joine), nastavíme aspoň 3,
-    // ale dôležité je to, čo sa stane nižšie.
     int requested_lives = (pkt.count > 0) ? pkt.count : 3;
     int requested_players = (pkt.player_id > 0) ? pkt.player_id : MAX_PLAYERS;
 
-    // 2. Nájdenie alebo vytvorenie hry
     ServerGame* game =
         find_or_create_game(requested_gid, requested_players, requested_lives);
 
@@ -94,18 +82,13 @@ void* client_handler(void* arg) {
         return NULL;
     }
 
-    // --- OPRAVA LOGIKY ŽIVOTOV ---
     int final_lives;
     if (requested_gid == 0) {
-        // Ak som zakladateľ (Host), platí to, čo som si vybral
         final_lives = requested_lives;
     } else {
-        // Ak sa pripájam (Join), platí to, čo je nastavené v hre
         final_lives = game->initial_lives;
     }
-    // -----------------------------
 
-    // 3. Pridanie hráča do hry s SPRÁVNYM počtom životov
     int player_idx = game_add_player(game, fd, final_lives);
 
     if (player_idx == -1) {
@@ -116,7 +99,6 @@ void* client_handler(void* arg) {
         return NULL;
     }
 
-    // ... Zvyšok funkcie ostáva rovnaký (MSG_WELCOME a slučka) ...
     GamePacket welcome = {.type = MSG_WELCOME};
     welcome.game_id = game->game_id;
     welcome.player_id = game->players[player_idx].id;
@@ -150,7 +132,6 @@ void* client_handler(void* arg) {
     return NULL;
 }
 
-// --- Signal Handler ---
 void sig_handler(int sig) {
     (void)sig;
     printf("\nSERVER: Shutting down...\n");
@@ -158,38 +139,37 @@ void sig_handler(int sig) {
     exit(0);
 }
 
-// --- Main ---
-int main() {
+int main(int argc, char* argv[]) {
     signal(SIGINT, sig_handler);
-    signal(SIGPIPE,
-           SIG_IGN);  // Ignorovať chyby pri zápise do zatvoreného socketu
+    signal(SIGPIPE, SIG_IGN);
 
-    // Inicializácia globálneho stavu
+    int port = 9999;
+    if (argc > 1) {
+        port = atoi(argv[1]);
+    }
+
     g_server.ipc = get_socket_interface();
     g_server.running = 1;
     pthread_mutex_init(&g_server.mutex, NULL);
 
     for (int i = 0; i < MAX_GAMES; i++) {
         g_server.games[i].is_running = false;
-        // Mutexy hier inicializujeme až pri ich vytvorení v game_init
     }
 
-    // Štart servera
-    int server_fd = g_server.ipc.init_server();
+    int server_fd = g_server.ipc.init_server(port);
     if (server_fd < 0) {
-        fprintf(stderr, "Failed to start server.\n");
+        fprintf(stderr, "Failed to start server on port %d.\n", port);
         return 1;
     }
 
     printf("╔════════════════════════════════╗\n");
-    printf("║    SERVER RUNNING ON %d      ║\n", PORT);
+    printf("║    SERVER RUNNING ON %d      ║\n", port);
     printf("╚════════════════════════════════╝\n");
 
     while (g_server.running) {
         int client_fd = g_server.ipc.accept_client(server_fd);
         if (client_fd < 0) continue;
 
-        // Vytvorenie vlákna pre klienta
         ClientThreadArgs* args = malloc(sizeof(ClientThreadArgs));
         if (!args) {
             close(client_fd);
@@ -203,7 +183,7 @@ int main() {
             free(args);
             close(client_fd);
         } else {
-            pthread_detach(tid);  // Vlákno sa samo uprace po skončení
+            pthread_detach(tid);
         }
     }
 

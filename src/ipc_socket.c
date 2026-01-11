@@ -9,7 +9,7 @@
 
 #include "../include/ipc_interface.h"
 
-static int s_init_server() {
+static int s_init_server(int port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
         perror("Socket creation failed");
@@ -21,7 +21,7 @@ static int s_init_server() {
 
     struct sockaddr_in addr = {.sin_family = AF_INET,
                                .sin_addr.s_addr = INADDR_ANY,
-                               .sin_port = htons(PORT)};
+                               .sin_port = htons(port)};
 
     if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         perror("Bind failed");
@@ -38,17 +38,17 @@ static int s_init_server() {
     return fd;
 }
 
-static int s_init_client(const char* addr_str) {
+static int s_init_client(const char* addr_str, int port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
         perror("Socket creation failed");
         return -1;
     }
 
-    struct sockaddr_in addr = {.sin_family = AF_INET, .sin_port = htons(PORT)};
+    struct sockaddr_in addr = {.sin_family = AF_INET, .sin_port = htons(port)};
 
     if (inet_pton(AF_INET, addr_str, &addr.sin_addr) <= 0) {
-        perror("Invalid address/ Address not supported");
+        perror("Invalid address");
         close(fd);
         return -1;
     }

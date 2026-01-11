@@ -8,22 +8,17 @@
 typedef struct {
     int game_id;
     bool is_running;
-
     int initial_lives;
     ServerPlayer players[MAX_PLAYERS];
     int max_players;
     int connected_count;
-
     int current_player_idx;
     int round_active;
-
     int current_bet_count;
     int current_bet_value;
     int last_bettor_idx;
-
     pthread_mutex_t mutex;
     IPC_Interface ipc;
-
 } ServerGame;
 
 void game_init(ServerGame* game, int id, int max_players, int initial_lives,

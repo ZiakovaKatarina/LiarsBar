@@ -1,6 +1,7 @@
 #include <ctype.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -18,7 +19,7 @@ static int parse_input(const char* input, int* out_count, int* out_val) {
         switch (toupper(card_char)) {
             case 'Q':
                 *out_val = CARD_QUEEN;
-                return 3;  // Kód 3 = Bet
+                return 3;
             case 'K':
                 *out_val = CARD_KING;
                 return 3;
@@ -43,15 +44,19 @@ void* network_thread_func(void* arg) {
         if (res <= 0) {
             pthread_mutex_lock(&state->mutex);
             state->is_running = false;
-            strcpy(state->last_message, "⚠️ Disconnected from server.");
+
+            if (strstr(state->last_message, "❌") == NULL) {
+                strcpy(state->last_message, "⚠️ Disconnected from server.");
+            }
+
             state->message_is_error = true;
             pthread_mutex_unlock(&state->mutex);
+
             ui_render_game(state);
             break;
         }
 
         client_process_packet(state, &pkt);
-
         ui_render_game(state);
     }
     return NULL;
@@ -103,14 +108,20 @@ void run_game_loop(ClientState* state) {
     pthread_join(net_thread, NULL);
 }
 
-int main() {
+int main(int argc, char* argv[]) {
+    int port = 9999;
+    if (argc > 1) {
+        port = atoi(argv[1]);
+    }
+
     IPC_Interface ipc = get_socket_interface();
     ClientState state;
 
     client_state_init(&state, ipc);
 
     while (1) {
-        ui_show_welcome();
+        ui_print_welcome();
+        printf("(Current Port: %d)\n\n", port);
         printf("1. New Game\n");
         printf("2. Join Game\n");
         printf("3. Rules\n");
@@ -119,23 +130,22 @@ int main() {
         int choice = ui_get_int("Choice: ", 1, 4, 0);
 
         if (choice == 3) {
-            ui_show_rules();
+            ui_print_rules();
             continue;
         }
         if (choice == 4) break;
 
-        if (!client_connect(&state, "127.0.0.1", true)) {
+        if (!client_connect(&state, "127.0.0.1", port, true)) {
             printf(RED "❌ Could not connect to server.\n" RESET);
             ui_wait_enter();
             continue;
         }
 
-        if (choice == 1) { 
+        if (choice == 1) {
             int players = ui_get_int("Number of players (2-4): ", 2, 4, 2);
             int lives = ui_get_int("Initial lives (1-5): ", 1, 5, 3);
-            client_send_join(&state, 0, lives,
-                             players);
-        } else {  
+            client_send_join(&state, 0, lives, players);
+        } else {
             int gid = ui_get_int("Enter Game ID: ", 1, 9999, 0);
             if (gid == 0) continue;
             client_send_join(&state, gid, 0, 0);

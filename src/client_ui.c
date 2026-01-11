@@ -16,14 +16,14 @@ static void print_card_symbol(int value) {
     }
 }
 
-void ui_show_welcome() {
+void ui_print_welcome() {
     printf(CLEAR_SCREEN);
     printf(BOLD CYAN "╔════════════════════════════════╗\n");
     printf("║        🎰 LIAR'S BAR 🎰        ║\n");
     printf("╚════════════════════════════════╝" RESET "\n\n");
 }
 
-void ui_show_rules() {
+void ui_print_rules() {
     printf(CLEAR_SCREEN);
     printf(BOLD YELLOW "📜 GAME RULES:\n" RESET);
     printf("1. Q < K < A < J (Joker is wildcard)\n");
@@ -64,7 +64,7 @@ void ui_render_game(ClientState* state) {
 
     printf(BOLD "💰 Table Bet: " RESET);
     if (state->current_bet_count > 0) {
-        printf(YELLOW "%d x ", state->current_bet_count);
+        printf(WHITE "%d x ", state->current_bet_count);
         print_card_symbol(state->current_bet_value);
         printf(RESET "\n");
     } else {
@@ -82,7 +82,11 @@ void ui_render_game(ClientState* state) {
     }
     printf("\n\n");
 
-    if (state->game_over) {
+    if (!state->is_running || state->game_over) {
+        printf(BOLD RED "Press ENTER to return to menu." RESET "\n");
+    } else if (!state->round_started) {
+        printf(WHITE "⏳ Waiting for other players to join..." RESET);
+    } else if (state->game_over) {
         printf(BOLD RED "GAME OVER. Press ENTER to quit." RESET "\n");
     } else if (state->player_id == state->current_player_id) {
         printf(BOLD CYAN

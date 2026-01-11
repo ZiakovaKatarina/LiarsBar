@@ -67,16 +67,34 @@ static void deal_cards(ServerGame* game) {
 int game_add_player(ServerGame* game, int fd, int lives) {
     pthread_mutex_lock(&game->mutex);
 
+    if (game->round_active) {
+        pthread_mutex_unlock(&game->mutex);
+        return -1;
+    }
+
     if (game->connected_count >= game->max_players) {
         pthread_mutex_unlock(&game->mutex);
         return -1;
     }
 
-    int idx = game->connected_count;
+    int idx = -1;
+    for (int i = 0; i < game->max_players; i++) {
+        if (game->players[i].fd == -1) {
+            idx = i;
+            break;
+        }
+    }
+
+    if (idx == -1) {
+        pthread_mutex_unlock(&game->mutex);
+        return -1;
+    }
+
     player_init(&game->players[idx], idx + 1, fd, lives, game->ipc);
     game->connected_count++;
 
-    printf("Game %d: Player %d joined.\n", game->game_id, idx + 1);
+    printf("Game %d: Player %d joined (Slot index: %d).\n", game->game_id,
+           idx + 1, idx);
 
     if (game->connected_count == game->max_players) {
         game_start_round(game);
@@ -93,13 +111,65 @@ int game_add_player(ServerGame* game, int fd, int lives) {
 
 void game_remove_player(ServerGame* game, int player_idx) {
     ServerPlayer* p = &game->players[player_idx];
+
     p->fd = -1;
     p->lives = 0;
     p->is_active = false;
+    if (game->connected_count > 0) game->connected_count--;
 
     char msg[64];
-    snprintf(msg, sizeof(msg), "Player %d disconnected.", p->id);
+    snprintf(msg, sizeof(msg), "🔌 Player %d disconnected.", p->id);
     game_broadcast_update(game, msg);
+
+    if (!game->round_active) return;
+
+    int alive_count = 0;
+    int winner_id = -1;
+    for (int i = 0; i < game->max_players; i++) {
+        if (game->players[i].is_active && game->players[i].lives > 0) {
+            alive_count++;
+            winner_id = game->players[i].id;
+        }
+    }
+
+    if (alive_count <= 1) {
+        GamePacket end_pkt = {.type = MSG_GAME_OVER};
+
+        if (winner_id != -1) {
+            snprintf(end_pkt.text, sizeof(end_pkt.text),
+                     "🏆 Player %d WINS! (Opponent surrendered)", winner_id);
+            printf("SERVER: Game #%d finished (Surrender). Winner: Player %d\n",
+                   game->game_id, winner_id);
+        } else {
+            strcpy(end_pkt.text, "Game ended (All players left).");
+            printf("SERVER: Game #%d finished (All players left).\n",
+                   game->game_id);
+        }
+
+        game_broadcast(game, &end_pkt);
+        game->round_active = 0;
+
+    } else {
+        if (game->current_player_idx == player_idx) {
+            game->current_player_idx = next_alive_player(game, player_idx);
+
+            GamePacket turn_pkt = {0};
+            turn_pkt.type = MSG_UPDATE;
+            turn_pkt.count = game->current_bet_count;
+            turn_pkt.card_value = game->current_bet_value;
+            turn_pkt.current_player_id =
+                game->players[game->current_player_idx].id;
+
+            for (int i = 0; i < MAX_PLAYERS; i++)
+                turn_pkt.lives[i] = game->players[i].lives;
+
+            snprintf(turn_pkt.text, sizeof(turn_pkt.text),
+                     "Player %d left. Turn moves to Player %d.", p->id,
+                     turn_pkt.current_player_id);
+
+            game_broadcast(game, &turn_pkt);
+        }
+    }
 }
 
 void game_start_round(ServerGame* game) {
@@ -236,11 +306,16 @@ void game_process_liar(ServerGame* game, int caller_idx) {
         if (winner_id != -1 && alive_count == 1) {
             snprintf(end_pkt.text, sizeof(end_pkt.text), "🏆 Player %d WINS!",
                      winner_id);
+            printf("SERVER: Game #%d finished. Winner: Player %d\n",
+                   game->game_id, winner_id);
         } else {
             strcpy(end_pkt.text, "Everyone died. Draw.");
+            printf("SERVER: Game #%d finished. Draw (everyone died).\n",
+                   game->game_id);
         }
         game_broadcast(game, &end_pkt);
         game->round_active = 0;
+
     } else {
         if (loser->lives > 0) {
             game->current_player_idx = loser_idx;

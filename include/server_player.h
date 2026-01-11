@@ -12,7 +12,6 @@ typedef struct {
     int lives;
     int cards[MAX_LIVES];
     bool is_active;
-
     IPC_Interface ipc;
 } ServerPlayer;
 
