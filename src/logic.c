@@ -1,5 +1,4 @@
 #include "../include/common.h"
-#include "../include/ipc_interface.h"
 #include "../include/logic.h"
 #include <time.h>
 #include <stdlib.h>
@@ -7,10 +6,7 @@
 #include <stdio.h>
 
 void deal_cards_to_all(int player_cards[MAX_PLAYERS][MAX_LIVES],
-                       int sockets[MAX_PLAYERS],
-                       IPC_Interface ipc,
-                       int lives[MAX_PLAYERS],
-                       int current_player) {
+                       int lives[MAX_PLAYERS]) {
     int deck[20] = {0};
     int k = 0;
     for (int i = 0; i < 6; i++) {
@@ -31,23 +27,10 @@ void deal_cards_to_all(int player_cards[MAX_PLAYERS][MAX_LIVES],
 
     int card_index = 0;
     for (int player = 0; player < MAX_PLAYERS; player++) {
-        if (sockets[player] != -1 && lives[player] > 0) {
+        if (lives[player] > 0) {
             for (int c = 0; c < lives[player]; c++) {
                 player_cards[player][c] = deck[card_index++];
             }
-
-            GamePacket pkt = {0};
-            pkt.MessageType = MSG_START_ROUND;
-            strcpy(pkt.text, "You received new cards!");
-            for (int i = 0; i < MAX_LIVES; i++) {
-                pkt.my_cards[i] = -1;
-            }
-            for (int i = 0; i < lives[player]; i++) {
-                pkt.my_cards[i] = player_cards[player][i];
-            }
-            memcpy(pkt.lives, lives, sizeof(pkt.lives));
-            pkt.current_player_id = current_player + 1;
-            ipc.send_packet(sockets[player], &pkt);
         }
     }
 }

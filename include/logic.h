@@ -2,14 +2,10 @@
 #define LOGIC_H
 
 #include "common.h"
-#include "ipc_interface.h"
 #include <stdbool.h>
 
 void deal_cards_to_all(int player_cards[MAX_PLAYERS][MAX_LIVES],
-                       int sockets[MAX_PLAYERS],
-                       IPC_Interface ipc,
-                       int lives[MAX_PLAYERS],
-                       int current_player);
+                       int lives[MAX_PLAYERS]);
 
 bool is_valid_bet(int current_count, int current_value,
                   int new_count, int new_value);

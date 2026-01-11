@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 3.10)
 project(LiarsBar C)
 
-set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra")
 
 find_package(Threads REQUIRED)
+
+include_directories(${CMAKE_SOURCE_DIR}/include)
 
 add_executable(client 
     src/client.c 
@@ -14,11 +17,9 @@ add_executable(client
 add_executable(server 
     src/server.c 
     src/socket_ipc.c 
-    src/logic.c
+    src/logic.c 
+    src/game.c
 )
-
-target_include_directories(client PRIVATE include)
-target_include_directories(server PRIVATE include)
 
 target_link_libraries(client PRIVATE Threads::Threads)
 target_link_libraries(server PRIVATE Threads::Threads)

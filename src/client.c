@@ -1,5 +1,6 @@
 #include "../include/common.h"
 #include "../include/ipc_interface.h"
+#include "../include/ui.h"
 #include <stdio.h>
 #include <ctype.h>
 #include <stdbool.h>
@@ -104,7 +105,7 @@ GamePacket parse_bet_input(const char* input) {
     int count;
     char card_char;
     if (sscanf(input, "%d %c", &count, &card_char) != 2) {
-        pkt.MessageType = -1;
+        pkt.MessageType = (MessageType)0;  // <- INIT NA 0 NAMIESTO -1
         return pkt;
     }
     
@@ -121,7 +122,7 @@ GamePacket parse_bet_input(const char* input) {
         pkt.count = count;
         pkt.card_value = value;
     } else {
-        pkt.MessageType = -1;
+        pkt.MessageType = (MessageType)0;  // <- INIT NA 0 NAMIESTO -1
     }
     return pkt;
 }
@@ -320,7 +321,7 @@ void game_loop(ClientThreadArgs *args, IPC_Interface ipc) {
         }
 
         GamePacket pkt = parse_bet_input(input);
-        if (pkt.MessageType == -1) {
+        if (pkt.MessageType == 0) {  // <- POROVNANIE S 0
             printf(RED "Invalid command. Try: '3 K' or 'liar'\n" RESET);
             if (args->current_player_id == args->player_id) {
                 printf(BLUE "> " RESET);

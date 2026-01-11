@@ -1,16 +1,18 @@
 #include "../include/common.h"
 #include "../include/ipc_interface.h"
 #include "../include/logic.h"
+#include "../include/game.h"
+#include "../include/ui.h"
+#include <signal.h>
+#include <fcntl.h>
+#include <sys/socket.h>
+#include <errno.h>
 #include <stdio.h>
-#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
-#include <signal.h>
-#include <errno.h>
-#include <fcntl.h>
 
 typedef struct {
     int game_id;
@@ -27,6 +29,7 @@ typedef struct {
     int last_bettor;
     int round_active;
     bool active;
+    Game* game;  // <- PRIDAJ TOTO
 } GameInstance;
 
 typedef struct {
@@ -50,8 +53,9 @@ void init_games(ServerState *state) {
     pthread_mutex_init(&state->global_mutex, NULL);
     
     for (int i = 0; i < MAX_GAMES; i++) {
+        state->games[i].game = NULL;  // <- INICIALIZUJ NA NULL
         state->games[i].active = false;
-        state->games[i].game_id = i;
+        state->games[i].game_id = i + 1;
         state->games[i].max_players = MAX_PLAYERS;
         pthread_mutex_init(&state->games[i].mutex, NULL);
         for (int j = 0; j < MAX_PLAYERS; j++) {
@@ -67,7 +71,7 @@ GameInstance* create_new_game(ServerState *state, int max_players) {
         if (!state->games[i].active) {
             memset(&state->games[i], 0, sizeof(GameInstance));
             state->games[i].active = true;
-            state->games[i].game_id = i;
+            state->games[i].game_id = i + 1;
             state->games[i].max_players = max_players;
             state->games[i].connected_players_count = 0;
             state->games[i].round_active = 0;
@@ -127,23 +131,35 @@ void start_new_round(GameInstance *inst, IPC_Interface ipc) {
     inst->current_bet_value = -1;
     inst->last_bettor = -1;
 
-    for (int p = 0; p < MAX_PLAYERS; p++) {
-        for (int c = 0; c < 5; c++) {
-            inst->player_cards[p][c] = -1;
+    // Initialize or sync encapsulated game state
+    if (!inst->game) {
+        inst->game = game_create(inst->max_players);
+    }
+    game_set_lives(inst->game, inst->lives);
+    game_set_current_player(inst->game, inst->current_player);
+
+    // Encapsulated round start (chooses next player + deals cards)
+    game_start_round(inst->game);
+    inst->current_player = game_get_current_player(inst->game);
+
+    // Notify players
+    for (int player = 0; player < inst->max_players; player++) {
+        if (inst->sockets[player] != -1 && inst->lives[player] > 0) {
+            GamePacket pkt = (GamePacket){0};
+            pkt.MessageType = MSG_START_ROUND;
+            strcpy(pkt.text, "You received new cards!");
+            for (int i = 0; i < MAX_LIVES; i++) pkt.my_cards[i] = -1;
+
+            int tmp[MAX_LIVES] = {0};
+            game_get_player_cards(inst->game, player, tmp);
+            for (int i = 0; i < inst->lives[player]; i++) {
+                pkt.my_cards[i] = tmp[i];
+            }
+            memcpy(pkt.lives, inst->lives, sizeof(pkt.lives));
+            pkt.current_player_id = inst->current_player + 1;
+            ipc.send_packet(inst->sockets[player], &pkt);
         }
     }
-
-    inst->current_player = next_player(inst->current_player, inst->lives);
-
-    if (inst->current_player == -1) {
-        inst->round_active = 0;
-        return;
-    }
-    
-    deal_cards_to_all(inst->player_cards, inst->sockets, ipc, inst->lives, inst->current_player);
-
-    printf(BLUE "[SERVER %d]" RESET " " YELLOW "🎯 New round! Player %d starts." RESET "\n", 
-           inst->game_id, inst->current_player + 1);
 
     char msg[128];
     sprintf(msg, YELLOW "🎯 New round! Player %d starts." RESET, inst->current_player + 1);
@@ -158,7 +174,7 @@ void handle_invalid_join(IPC_Interface ipc, int fd, const char* message) {
 }
 
 void send_welcome_packet(GameInstance *inst, IPC_Interface ipc, 
-                        ThreadArgs *ta, int my_id, int initial_lives) {
+                        ThreadArgs *ta, int my_id) {
     GamePacket welcome = {0};
     welcome.MessageType = MSG_WELCOME;
     welcome.player_id = my_id;
@@ -478,7 +494,7 @@ void* handle_client(void* arg) {
     printf(BLUE "[SERVER %d]" RESET " " GREEN "🔗 Player %d connected (%d/%d, lives: %d).\n" RESET,
            instance->game_id, my_id, instance->connected_players_count, instance->max_players, initial_lives);
 
-    send_welcome_packet(instance, server_ipc, ta, my_id, initial_lives);
+    send_welcome_packet(instance, server_ipc, ta, my_id);
     send_wait_packet(instance, server_ipc);
 
     if (instance->connected_players_count >= instance->max_players && instance->round_active == 0) {
