@@ -1,5 +1,6 @@
-#include <stdio.h>
 #include <ctype.h>
+#include <pthread.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -8,7 +9,7 @@
 #include "../include/common.h"
 #include "../include/ipc_interface.h"
 
-static int parse_input(const char* input, int* out_count, int* out_value) {
+static int parse_input(const char* input, int* out_count, int* out_val) {
     if (strcasecmp(input, "liar") == 0) return 1;
     if (strcasecmp(input, "quit") == 0) return 2;
 
@@ -16,28 +17,29 @@ static int parse_input(const char* input, int* out_count, int* out_value) {
     if (sscanf(input, "%d %c", out_count, &card_char) == 2) {
         switch (toupper(card_char)) {
             case 'Q':
-                *out_value = CARD_QUEEN;
-                return 3;
+                *out_val = CARD_QUEEN;
+                return 3;  // Kód 3 = Bet
             case 'K':
-                *out_value = CARD_KING;
+                *out_val = CARD_KING;
                 return 3;
             case 'A':
-                *out_value = CARD_ACE;
+                *out_val = CARD_ACE;
                 return 3;
             case 'J':
-                *out_value = CARD_JOKER;
+                *out_val = CARD_JOKER;
                 return 3;
         }
     }
     return 0;
 }
 
-void* network_thread_func(void* args) {
-    ClientState* state = (ClientState*) args;
+void* network_thread_func(void* arg) {
+    ClientState* state = (ClientState*)arg;
     GamePacket pkt;
 
     while (state->is_running) {
         int res = state->ipc.receive_packet(state->fd, &pkt);
+
         if (res <= 0) {
             pthread_mutex_lock(&state->mutex);
             state->is_running = false;
@@ -49,6 +51,7 @@ void* network_thread_func(void* args) {
         }
 
         client_process_packet(state, &pkt);
+
         ui_render_game(state);
     }
     return NULL;
@@ -56,16 +59,17 @@ void* network_thread_func(void* args) {
 
 void run_game_loop(ClientState* state) {
     pthread_t net_thread;
+
     if (pthread_create(&net_thread, NULL, network_thread_func, state) != 0) {
         printf("Error creating network thread.\n");
         return;
     }
 
     char buffer[256];
-    int bet_count;
-    int bet_val;
+    int bet_count, bet_val;
 
     ui_render_game(state);
+
     while (state->is_running) {
         if (!fgets(buffer, sizeof(buffer), stdin)) break;
 
@@ -86,7 +90,8 @@ void run_game_loop(ClientState* state) {
                 break;
             default:
                 pthread_mutex_lock(&state->mutex);
-                snprintf(state->last_message, sizeof(state->last_message), "❌ Invalid command. Try '2 K' or 'liar'.");
+                snprintf(state->last_message, sizeof(state->last_message),
+                         "❌ Invalid command. Try '2 K' or 'liar'.");
                 state->message_is_error = true;
                 pthread_mutex_unlock(&state->mutex);
                 ui_render_game(state);
@@ -101,57 +106,46 @@ void run_game_loop(ClientState* state) {
 int main() {
     IPC_Interface ipc = get_socket_interface();
     ClientState state;
+
     client_state_init(&state, ipc);
 
-    while(1) {
+    while (1) {
         ui_show_welcome();
-        printf(BOLD "Menu:" RESET "\n");
-        printf(YELLOW "1." RESET " New game\n");
-        printf(YELLOW "2." RESET " Join game\n");
-        printf(YELLOW "3." RESET " Exit\n");
-        printf(YELLOW "4." RESET " Game rules\n\n");
+        printf("1. New Game\n");
+        printf("2. Join Game\n");
+        printf("3. Rules\n");
+        printf("4. Exit\n\n");
 
         int choice = ui_get_int("Choice: ", 1, 4, 0);
+
         if (choice == 3) {
-            printf(CYAN "Goodbye!\n" RESET);
-            break;
-        } else if (choice == 4) {
             ui_show_rules();
             continue;
-        } else if (choice == 1 || choice == 2) {
-            if (!client_connect(&state, "127.0.0.1", true)) {
-                printf(RED "❌ Could not connect to server.\n" RESET);
-                ui_wait_enter();
-                continue;
-            }
+        }
+        if (choice == 4) break;
 
-            if (choice == 1) {
-                int players = ui_get_int("Number of players (2-4): ", 2, 4, 2);
-                int lives = ui_get_int("Initial lives (1-5): ", 1, 5, 3);
-                client_send_join(&state, 0, lives, players);
-            } else {
-                int gid = ui_get_int("Enter Game ID: ", 1, 9999, 0);
-                if (gid <= 0 || gid >= 10000) {
-                    printf(RED "❌ Invalid ID (must be > 0 and < 9999).\n" RESET);
-                    continue;
-                }
-                client_send_join(&state, gid, 0, 0);
-            }
-
-            run_game_loop(&state);
-            client_disconnect(&state);
-            printf(RESET "\nReturning to menu...\n");
-            sleep(1);
-        } else {
-            printf(RED "Invalid choice.\n" RESET);
-            break;
+        if (!client_connect(&state, "127.0.0.1", true)) {
+            printf(RED "❌ Could not connect to server.\n" RESET);
+            ui_wait_enter();
+            continue;
         }
 
-        printf(BOLD YELLOW "\n╔════════════════════════════════╗\n");
-        printf("║        🏆 GAME OVER 🏆         ║\n");
-        printf("╚════════════════════════════════╝" RESET "\n");
+        if (choice == 1) { 
+            int players = ui_get_int("Number of players (2-4): ", 2, 4, 2);
+            int lives = ui_get_int("Initial lives (1-5): ", 1, 5, 3);
+            client_send_join(&state, 0, lives,
+                             players);
+        } else {  
+            int gid = ui_get_int("Enter Game ID: ", 1, 9999, 0);
+            if (gid == 0) continue;
+            client_send_join(&state, gid, 0, 0);
+        }
 
-        printf(CYAN "\nReturning to main menu...\n\n" RESET);
+        run_game_loop(&state);
+
+        client_disconnect(&state);
+        printf(RESET "\nReturning to menu...\n");
+        sleep(1);
     }
 
     client_state_destroy(&state);

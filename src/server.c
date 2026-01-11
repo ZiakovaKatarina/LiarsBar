@@ -22,8 +22,7 @@ typedef struct {
     int client_fd;
 } ClientThreadArgs;
 
-ServerGame* find_or_create_game(int game_id, int max_players,
-                                int requested_lives) {
+ServerGame* find_or_create_game(int game_id, int max_players, int requested_lives) {
     pthread_mutex_lock(&g_server.mutex);
 
     ServerGame* target_game = NULL;
@@ -31,7 +30,7 @@ ServerGame* find_or_create_game(int game_id, int max_players,
     if (game_id == 0) {
         for (int i = 0; i < MAX_GAMES; i++) {
             if (!g_server.games[i].is_running) {
-                int new_id = 1000 + i;
+                int new_id = i + 1;
                 game_init(&g_server.games[i], new_id, max_players,
                           requested_lives, g_server.ipc);
                 target_game = &g_server.games[i];

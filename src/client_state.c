@@ -5,7 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 
-#define SERVER_PATH "./server"
+#define SERVER_EXEC "./bin/server"
 
 void client_state_init(ClientState* state, IPC_Interface ipc) {
     memset(state, 0, sizeof(ClientState));
@@ -15,6 +15,7 @@ void client_state_init(ClientState* state, IPC_Interface ipc) {
     state->current_bet_value = -1;
     pthread_mutex_init(&state->mutex, NULL);
 
+    // Inicializácia kariet na -1
     for (int i = 0; i < MAX_LIVES; i++) state->my_cards[i] = -1;
 }
 
@@ -23,7 +24,8 @@ void client_state_destroy(ClientState* state) {
     pthread_mutex_destroy(&state->mutex);
 }
 
-bool client_connect(ClientState* state, const char* address, bool auto_start_server) {
+bool client_connect(ClientState* state, const char* address,
+                    bool auto_start_server) {
     state->is_running = true;
     state->game_over = false;
     state->round_started = false;
@@ -39,7 +41,7 @@ bool client_connect(ClientState* state, const char* address, bool auto_start_ser
 
     if (state->fd < 0 && auto_start_server) {
         printf("⚠️  Server not found. Attempting to start server...\n");
-        system(SERVER_PATH " &");
+        system(SERVER_EXEC " &");
         sleep(1);
 
         state->fd = state->ipc.init_client(address);
@@ -64,9 +66,8 @@ void client_send_join(ClientState* state, int game_id, int lives, int players) {
 }
 
 void client_send_bet(ClientState* state, int count, int card_value) {
-    GamePacket pkt = {.type = MSG_BET,
-                      .count = count,
-                      .card_value = card_value};
+    GamePacket pkt = {
+        .type = MSG_BET, .count = count, .card_value = card_value};
     state->ipc.send_packet(state->fd, &pkt);
 }
 
@@ -88,7 +89,8 @@ bool client_process_packet(ClientState* state, GamePacket* pkt) {
     pthread_mutex_lock(&state->mutex);
 
     if (strlen(pkt->text) > 0) {
-        strncpy(state->last_message, pkt->text, sizeof(state->last_message) - 1);
+        strncpy(state->last_message, pkt->text,
+                sizeof(state->last_message) - 1);
         state->message_is_error = (strstr(pkt->text, "❌") != NULL);
     }
 
@@ -97,8 +99,8 @@ bool client_process_packet(ClientState* state, GamePacket* pkt) {
             state->player_id = pkt->player_id;
             state->game_id = pkt->game_id;
             memcpy(state->lives, pkt->lives, sizeof(state->lives));
-            printf("[SERVER]: 🎮 Welcome! You are Player %d in game %d.\n", pkt->player_id, pkt->game_id);
             break;
+
         case MSG_START_ROUND:
             state->round_started = true;
             state->current_bet_count = 0;
@@ -107,26 +109,24 @@ bool client_process_packet(ClientState* state, GamePacket* pkt) {
             memcpy(state->my_cards, pkt->my_cards, sizeof(state->my_cards));
             memcpy(state->lives, pkt->lives, sizeof(state->lives));
             break;
+
         case MSG_UPDATE:
             if (pkt->count > 0) {
                 state->current_bet_count = pkt->count;
                 state->current_bet_value = pkt->card_value;
             }
-
             if (pkt->current_player_id > 0) {
                 state->current_player_id = pkt->current_player_id;
             }
-
             memcpy(state->lives, pkt->lives, sizeof(state->lives));
             break;
+
         case MSG_GAME_OVER:
             state->game_over = true;
-            state->is_running = false;
-
-            printf(BOLD YELLOW "\n╔════════════════════════════════╗\n");
-            printf("║        🏆 GAME OVER 🏆         ║\n");
-            printf("╚════════════════════════════════╝\n");
+            state->is_running =
+                false;
             break;
+
         default:
             break;
     }
