@@ -1,303 +1,132 @@
-#include "../include/common.h"
-#include "../include/ipc_interface.h"
-#include <stdio.h>
 #include <ctype.h>
-#include <stdbool.h>
-#include <stdlib.h>
+#include <pthread.h>
+#include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/wait.h>
-#include <pthread.h>
-#include <poll.h>
 
-#define SERVER_PATH "./server"
+#include "../include/client_state.h"
+#include "../include/client_ui.h"
+#include "../include/common.h"
+#include "../include/ipc_interface.h"
 
-typedef struct ClientThreadArgs {
-    int fd;
-    IPC_Interface ipc;
-    volatile int is_running;
-    volatile bool intentional_quit;
-    int player_id;
-    int game_id;
-    int lives[MAX_PLAYERS];
-    int current_player_id;
-    int last_current_player_id;
-    int current_bet_count;
-    int current_bet_value;
-    bool game_started;
-    int my_cards[MAX_LIVES];
-    volatile bool wait_for_enter;
-} ClientThreadArgs;
+static int parse_input(const char* input, int* out_count, int* out_val) {
+    if (strcasecmp(input, "liar") == 0) return 1;
+    if (strcasecmp(input, "quit") == 0) return 2;
 
-void print_card(int value) {
-    const char* symbols[] = {"Q", "K", "A", "J"};
-    if (value >= 0 && value <= 3) {
-        printf("%s", symbols[value]);
-    } else {
-        printf("?");
-    }
-}
-
-void wait_for_enter(void) {
-    printf(CYAN "\nPress Enter to return to main menu... " RESET);
-    fflush(stdout);
-    int c;
-    while ((c = getchar()) != '\n' && c != EOF);
-}
-
-void print_game_state(ClientThreadArgs *args) {
-    if (args->current_player_id == 0) return;
-
-    printf(BOLD BLUE "\n╔════════════════════════════════╗\n");
-    printf("║          📊 GAME STATE         ║\n");
-    printf("╚════════════════════════════════╝" RESET "\n");
-    
-    printf(MAGENTA "❤️  Lives:" RESET "\n");
-    for (int i = 0; i < MAX_PLAYERS; i++) {
-        if (args->lives[i] > 0 || i + 1 == args->player_id) {
-            printf("   Player %d: ", i + 1);
-            for (int j = 0; j < args->lives[i]; j++) printf(RED "❤️ " RESET);
-            printf(MAGENTA " (%d)" RESET "\n", args->lives[i]);
-        }
-    }
-    printf("\n");
-
-    if (args->current_bet_count > 0) {
-        printf(YELLOW "💰 Current bet: %d x ", args->current_bet_count);
-        print_card(args->current_bet_value);
-        printf(RESET "\n");
-    }
-
-    printf(CYAN "➡️  Turn:  Player %d" RESET, args->current_player_id);
-    if (args->current_player_id == args->player_id) {
-        printf(RED " " BOLD "◄── YOU!" RESET "\n");
-    } else {
-        printf("\n");
-    }
-
-    printf(GREEN "📋 Your cards: " RESET);
-    for (int i = 0; i < MAX_LIVES; i++) {
-        if (args->my_cards[i] >= 0) {
-            printf(GREEN);
-            print_card(args->my_cards[i]);
-            printf(" " RESET);
-        }
-    }
-    printf("\n");
-}
-
-void init_client_args(ClientThreadArgs *args, IPC_Interface ipc) {
-    memset(args, 0, sizeof(ClientThreadArgs));
-    args->ipc = ipc;
-    args->is_running = 1;
-    args->fd = -1;
-}
-
-GamePacket parse_bet_input(const char* input) {
-    GamePacket pkt = {0};
-    
-    if (strcasecmp(input, "liar") == 0) {
-        pkt.MessageType = MSG_LIAR;
-        return pkt;
-    }
-    
-    int count;
     char card_char;
-    if (sscanf(input, "%d %c", &count, &card_char) != 2) {
-        pkt.MessageType = -1;
-        return pkt;
-    }
-    
-    int value = -1;
-    switch(toupper(card_char)) {
-        case 'Q': value = CARD_QUEEN; break;
-        case 'K': value = CARD_KING; break;
-        case 'A': value = CARD_ACE; break;
-        case 'J': value = CARD_JOKER; break;
-    }
-    
-    if (value != -1 && count > 0) {
-        pkt.MessageType = MSG_BET;
-        pkt.count = count;
-        pkt.card_value = value;
-    } else {
-        pkt.MessageType = -1;
-    }
-    return pkt;
-}
-
-void start_server_if_needed(ClientThreadArgs *args, IPC_Interface ipc) {
-    args->fd = ipc.init_client("127.0.0.1");
-    
-    if (args->fd < 0) {
-        printf(YELLOW "⚠️  Server not running - starting automatically...\n" RESET);
-        
-        if (system(SERVER_PATH " &") == -1) {
-            printf(RED "❌ Failed to start server!\n" RESET);
-            printf(YELLOW "Try starting server manually:\n   ./server\n\n" RESET);
-            return;
-        }
-        
-        for (int i = 0; i < 10 && args->fd < 0; i++) {
-            usleep(200000);
-            args->fd = ipc.init_client("127.0.0.1");
-        }
-        
-        if (args->fd < 0) {
-            printf(RED "❌ Still cannot connect to server.\n" RESET);
-            printf(YELLOW "Try again or start server manually.\n\n" RESET);
-            return;
+    if (sscanf(input, "%d %c", out_count, &card_char) == 2) {
+        switch (toupper(card_char)) {
+            case 'Q':
+                *out_val = CARD_QUEEN;
+                return 3;  // Kód 3 = Bet
+            case 'K':
+                *out_val = CARD_KING;
+                return 3;
+            case 'A':
+                *out_val = CARD_ACE;
+                return 3;
+            case 'J':
+                *out_val = CARD_JOKER;
+                return 3;
         }
     }
-
-    printf(CYAN "✅ Connected to server.\n" RESET);
+    return 0;
 }
 
-void handle_message_welcome(ClientThreadArgs *args, GamePacket *pkt) {
-    args->player_id = pkt->player_id;
-    args->game_id = pkt->game_id;
-    memcpy(args->lives, pkt->lives, sizeof(pkt->lives));
-    printf(CYAN "[SERVER]: 🎮 Welcome! You are Player %d in game %d." RESET "\n", 
-           pkt->player_id, pkt->game_id);
-}
-
-void handle_message_start_round(ClientThreadArgs *args, GamePacket *pkt) {
-    args->game_started = true;
-    printf(YELLOW "\n╔════════════════════════════════╗\n");
-    printf("║        🎯 NEW ROUND 🎯         ║\n");
-    printf("╚════════════════════════════════╝" RESET "\n");
-    printf(GREEN "📋 Your cards: " RESET);
-    
-    for(int i = 0; i < MAX_LIVES; i++) {
-        if (pkt->my_cards[i] >= 0) {
-            printf(GREEN);
-            print_card(pkt->my_cards[i]);
-            printf(" " RESET);
-        }
-    }
-    printf("\n");
-
-    memcpy(args->lives, pkt->lives, sizeof(pkt->lives));
-    memcpy(args->my_cards, pkt->my_cards, sizeof(pkt->my_cards));
-    args->current_player_id = pkt->current_player_id;
-    args->last_current_player_id = 0;
-    args->current_bet_count = 0;
-    args->current_bet_value = -1;
-}
-
-void handle_message_update(ClientThreadArgs *args, GamePacket *pkt) {
-    memcpy(args->lives, pkt->lives, sizeof(pkt->lives));
-    
-    if (pkt->current_player_id != 0) {
-        args->current_player_id = pkt->current_player_id;
-    }
-    if (pkt->count > 0) {
-        args->current_bet_count = pkt->count;
-        args->current_bet_value = pkt->card_value;
-    }
-
-    bool is_fatal_error = (strstr(pkt->text, "not exist") != NULL) ||
-                          (strstr(pkt->text, "full") != NULL) ||
-                          (strstr(pkt->text, "Server is full") != NULL);
-
-    if (strstr(pkt->text, "❌") != NULL && is_fatal_error) {
-        printf(RED "%s\n" RESET, pkt->text);
-        args->wait_for_enter = true;
-        args->is_running = 0;
-        return;
-    }
-
-    bool waiting = (args->current_player_id == 0 && 
-                   args->current_bet_count == 0 && 
-                   !args->game_started);
-    if (waiting) {
-        printf("%s\n", pkt->text);
-        return;
-    }
-
-    printf(BLUE "[UPDATE]: %s" RESET "\n", pkt->text);
-
-    if (args->current_player_id != args->last_current_player_id && 
-        args->current_player_id != 0) {
-        print_game_state(args);
-        args->last_current_player_id = args->current_player_id;
-        if (args->current_player_id == args->player_id) {
-            printf(BLUE "> " RESET);
-            fflush(stdout);
-        }
-    } else if (strstr(pkt->text, "❌ Bet") != NULL && 
-               args->current_player_id == args->player_id) {
-        printf(BLUE "> " RESET);
-        fflush(stdout);
-    }
-}
-
-void handle_message_game_over(ClientThreadArgs *args, GamePacket *pkt) {
-    printf(BOLD YELLOW "\n╔════════════════════════════════╗\n");
-    printf("║        🏆 GAME OVER 🏆         ║\n");
-    printf("╚════════════════════════════════╝" RESET "\n");
-    printf(GREEN "%s" RESET "\n", pkt->text);
-    args->wait_for_enter = true;
-    args->is_running = 0;
-}
-
-void* receive_thread(void* arg) {
-    ClientThreadArgs *args = (ClientThreadArgs*)arg;
+void* network_thread_func(void* arg) {
+    ClientState* state = (ClientState*)arg;
     GamePacket pkt;
 
-    while(args->is_running) {
-        int res = args->ipc.receive_packet(args->fd, &pkt);
+    while (state->is_running) {
+        int res = state->ipc.receive_packet(state->fd, &pkt);
 
         if (res <= 0) {
-            if (!args->intentional_quit) {
-                printf(RED BOLD "\n╔════════════════════════════════════╗\n");
-                printf("║      ⚠️   SERVER TERMINATED ⚠️       ║\n");
-                printf("╚════════════════════════════════════╝" RESET "\n");
-                printf(YELLOW "Connection to server lost.\n");
-                printf("Server was probably shut down or crashed.\n" RESET);
-                fflush(stdout);
-                args->wait_for_enter = true;
-            }
-            args->is_running = 0;
+            pthread_mutex_lock(&state->mutex);
+            state->is_running = false;
+            strcpy(state->last_message, "⚠️ Disconnected from server.");
+            state->message_is_error = true;
+            pthread_mutex_unlock(&state->mutex);
+            ui_render_game(state);
             break;
         }
 
-        switch(pkt.MessageType) {
-            case MSG_WELCOME:
-                handle_message_welcome(args, &pkt);
-                break;
-            case MSG_START_ROUND:
-                handle_message_start_round(args, &pkt);
-                break;
-            case MSG_UPDATE:
-                handle_message_update(args, &pkt);
-                break;
-            case MSG_GAME_OVER:
-                handle_message_game_over(args, &pkt);
-                break;
-            default:
-                break;
-        }
+        client_process_packet(state, &pkt);
+
+        ui_render_game(state);
     }
     return NULL;
 }
 
-void game_loop(ClientThreadArgs *args, IPC_Interface ipc) {
-    pthread_t recv_tid;
-    pthread_create(&recv_tid, NULL, receive_thread, args);
+void run_game_loop(ClientState* state) {
+    pthread_t net_thread;
 
-    char input[256];
-    struct pollfd pfd = { .fd = 0, .events = POLLIN };
+    if (pthread_create(&net_thread, NULL, network_thread_func, state) != 0) {
+        printf("Error creating network thread.\n");
+        return;
+    }
 
-    while (args->is_running) {
-        if (!args->game_started) {
-            usleep(100000);
+    char buffer[256];
+    int bet_count, bet_val;
+
+    ui_render_game(state);
+
+    while (state->is_running) {
+        if (!fgets(buffer, sizeof(buffer), stdin)) break;
+
+        buffer[strcspn(buffer, "\n")] = 0;
+        if (strlen(buffer) == 0) continue;
+
+        int cmd_type = parse_input(buffer, &bet_count, &bet_val);
+
+        switch (cmd_type) {
+            case 1:
+                client_send_liar(state);
+                break;
+            case 2:
+                client_send_quit(state);
+                break;
+            case 3:
+                client_send_bet(state, bet_count, bet_val);
+                break;
+            default:
+                pthread_mutex_lock(&state->mutex);
+                snprintf(state->last_message, sizeof(state->last_message),
+                         "❌ Invalid command. Try '2 K' or 'liar'.");
+                state->message_is_error = true;
+                pthread_mutex_unlock(&state->mutex);
+                ui_render_game(state);
+                break;
+        }
+    }
+
+    state->is_running = false;
+    pthread_join(net_thread, NULL);
+}
+
+int main() {
+    IPC_Interface ipc = get_socket_interface();
+    ClientState state;
+
+    client_state_init(&state, ipc);
+
+    while (1) {
+        ui_show_welcome();
+        printf("1. New Game\n");
+        printf("2. Join Game\n");
+        printf("3. Rules\n");
+        printf("4. Exit\n\n");
+
+        int choice = ui_get_int("Choice: ", 1, 4, 0);
+
+        if (choice == 3) {
+            ui_show_rules();
             continue;
         }
+        if (choice == 4) break;
 
-        int ret = poll(&pfd, 1, 100);
-        if (ret <= 0) {
-            if (ret < 0) break;
+        if (!client_connect(&state, "127.0.0.1", true)) {
+            printf(RED "❌ Could not connect to server.\n" RESET);
+            ui_wait_enter();
             continue;
         }
 
@@ -317,11 +146,6 @@ void game_loop(ClientThreadArgs *args, IPC_Interface ipc) {
             args->is_running = 0;
             ipc.close_conn(args->fd);
             break;
-        }
-
-        if (args->current_player_id != args->player_id) {
-            printf(RED "Not your turn!" RESET "\n");
-            continue;
         }
 
         GamePacket pkt = parse_bet_input(input);
