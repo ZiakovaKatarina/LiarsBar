@@ -9,15 +9,17 @@ find_package(Threads REQUIRED)
 include_directories(${CMAKE_SOURCE_DIR}/include)
 
 add_executable(client 
-    src/client.c 
-    src/socket_ipc.c 
+    src/client.c
+    src/client_state.c
+    src/client_ui.c
+    src/socket_ipc.c
     src/logic.c
 )
 
 add_executable(server 
-    src/server.c 
-    src/socket_ipc.c 
-    src/logic.c 
+    src/server.c
+    src/socket_ipc.c
+    src/logic.c
     src/game.c
 )
 

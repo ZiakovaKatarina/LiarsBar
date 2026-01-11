@@ -2,7 +2,7 @@
 #include "../include/ipc_interface.h"
 #include "../include/logic.h"
 #include "../include/game.h"
-#include "../include/ui.h"
+#include "../include/client_ui.h"
 #include <signal.h>
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -113,7 +113,7 @@ void send_game_update(GameInstance *inst, IPC_Interface ipc,
                       const char* message, int bet_count, 
                       int bet_value, int player_id) {
     GamePacket pkt = {0};
-    pkt.MessageType = MSG_UPDATE;
+    pkt.type = MSG_UPDATE;
     pkt.game_id = inst->game_id;
     strcpy(pkt.text, message);
     pkt.count = bet_count;
@@ -146,7 +146,7 @@ void start_new_round(GameInstance *inst, IPC_Interface ipc) {
     for (int player = 0; player < inst->max_players; player++) {
         if (inst->sockets[player] != -1 && inst->lives[player] > 0) {
             GamePacket pkt = (GamePacket){0};
-            pkt.MessageType = MSG_START_ROUND;
+            pkt.type = MSG_START_ROUND;
             strcpy(pkt.text, "You received new cards!");
             for (int i = 0; i < MAX_LIVES; i++) pkt.my_cards[i] = -1;
 
@@ -168,7 +168,7 @@ void start_new_round(GameInstance *inst, IPC_Interface ipc) {
 
 void handle_invalid_join(IPC_Interface ipc, int fd, const char* message) {
     GamePacket err = {0};
-    err.MessageType = MSG_UPDATE;
+    err.type = MSG_UPDATE;
     strcpy(err.text, message);
     ipc.send_packet(fd, &err);
 }
@@ -176,7 +176,7 @@ void handle_invalid_join(IPC_Interface ipc, int fd, const char* message) {
 void send_welcome_packet(GameInstance *inst, IPC_Interface ipc, 
                         ThreadArgs *ta, int my_id) {
     GamePacket welcome = {0};
-    welcome.MessageType = MSG_WELCOME;
+    welcome.type = MSG_WELCOME;
     welcome.player_id = my_id;
     welcome.game_id = inst->game_id;
     sprintf(welcome.text, "Welcome! You are Player %d in game %d.", my_id, inst->game_id);
@@ -189,7 +189,7 @@ void send_wait_packet(GameInstance *inst, IPC_Interface ipc) {
     if (shown > inst->max_players) shown = inst->max_players;
 
     GamePacket wait_pkt = {0};
-    wait_pkt.MessageType = MSG_UPDATE;
+    wait_pkt.type = MSG_UPDATE;
     wait_pkt.game_id = inst->game_id;
     if (inst->connected_players_count < inst->max_players) {
         sprintf(wait_pkt.text, YELLOW "⏳ Waiting for players... (%d/%d)" RESET, shown, inst->max_players);
@@ -208,7 +208,7 @@ void handle_bet_message(GameInstance *inst, IPC_Interface ipc,
 
     if (!is_valid_bet(inst->current_bet_count, inst->current_bet_value, new_count, new_value)) {
         GamePacket err = {0};
-        err.MessageType = MSG_UPDATE;
+        err.type = MSG_UPDATE;
         err.game_id = inst->game_id;
         sprintf(err.text, RED "❌ Bet must be higher!" RESET);
         memcpy(err.lives, inst->lives, sizeof(err.lives));
@@ -223,7 +223,7 @@ void handle_bet_message(GameInstance *inst, IPC_Interface ipc,
     
     if (new_count > total_cards) {
         GamePacket err = {0};
-        err.MessageType = MSG_UPDATE;
+        err.type = MSG_UPDATE;
         err.game_id = inst->game_id;
         sprintf(err.text, RED "❌ Bet is higher than total cards (%d)!" RESET, total_cards);
         memcpy(err.lives, inst->lives, sizeof(err.lives));
@@ -242,7 +242,7 @@ void handle_bet_message(GameInstance *inst, IPC_Interface ipc,
            inst->game_id, my_id, new_count, card_names[new_value]);
 
     GamePacket up = {0};
-    up.MessageType = MSG_UPDATE;
+    up.type = MSG_UPDATE;
     up.game_id = inst->game_id;
     sprintf(up.text, YELLOW "💰 Player %d bets: %d x %s" RESET, my_id, new_count, card_names[new_value]);
     up.count = new_count;
@@ -270,7 +270,7 @@ void handle_liar_message(GameInstance *inst, IPC_Interface ipc, int my_id) {
         }
         
         GamePacket result_pkt = {0};
-        result_pkt.MessageType = MSG_UPDATE;
+        result_pkt.type = MSG_UPDATE;
         result_pkt.game_id = inst->game_id;
         sprintf(result_pkt.text, RED "❌ Player %d called LIAR with no bet – loses a life!" RESET, my_id);
         memcpy(result_pkt.lives, inst->lives, sizeof(inst->lives));
@@ -281,7 +281,7 @@ void handle_liar_message(GameInstance *inst, IPC_Interface ipc, int my_id) {
         
         if (alive_count <= 1) {
             GamePacket game_over_pkt = {0};
-            game_over_pkt.MessageType = MSG_GAME_OVER;
+            game_over_pkt.type = MSG_GAME_OVER;
             game_over_pkt.game_id = inst->game_id;
             if (alive_count == 1) {
                 sprintf(game_over_pkt.text, GREEN "🏆 Player %d won the game!" RESET, winner_id + 1);
@@ -317,7 +317,7 @@ void handle_liar_message(GameInstance *inst, IPC_Interface ipc, int my_id) {
            inst->current_bet_count, card_names[inst->current_bet_value]);
 
     GamePacket result_pkt = {0};
-    result_pkt.MessageType = MSG_UPDATE;
+    result_pkt.type = MSG_UPDATE;
     result_pkt.game_id = inst->game_id;
     if (liar_succeeds) {
         sprintf(result_pkt.text, GREEN "🎭 Liar succeeded! Only %d x %s. Player %d loses life." RESET,
@@ -334,7 +334,7 @@ void handle_liar_message(GameInstance *inst, IPC_Interface ipc, int my_id) {
 
     if (alive_count <= 1) {
         GamePacket game_over_pkt = {0};
-        game_over_pkt.MessageType = MSG_GAME_OVER;
+        game_over_pkt.type = MSG_GAME_OVER;
         game_over_pkt.game_id = inst->game_id;
         if (alive_count == 1) {
             sprintf(game_over_pkt.text, GREEN "🏆 Player %d won the game!" RESET, winner_id + 1);
@@ -359,7 +359,7 @@ void handle_disconnect(GameInstance *inst, IPC_Interface ipc, ThreadArgs *ta) {
            inst->game_id, ta->player_id, inst->connected_players_count, inst->max_players);
 
     GamePacket disc_pkt = {0};
-    disc_pkt.MessageType = MSG_UPDATE;
+    disc_pkt.type = MSG_UPDATE;
     disc_pkt.game_id = inst->game_id;
     sprintf(disc_pkt.text, RED "🔌 Player %d left the game." RESET, ta->player_id);
     memcpy(disc_pkt.lives, inst->lives, sizeof(disc_pkt.lives));
@@ -373,7 +373,7 @@ void handle_disconnect(GameInstance *inst, IPC_Interface ipc, ThreadArgs *ta) {
         } else {
             inst->current_player = next_p;
             GamePacket turn_pkt = {0};
-            turn_pkt.MessageType = MSG_UPDATE;
+            turn_pkt.type = MSG_UPDATE;
             turn_pkt.game_id = inst->game_id;
             sprintf(turn_pkt.text, CYAN "➡️  Turn: Player %d" RESET, inst->current_player + 1);
             turn_pkt.current_player_id = inst->current_player + 1;
@@ -387,7 +387,7 @@ void handle_disconnect(GameInstance *inst, IPC_Interface ipc, ThreadArgs *ta) {
 
     if (alive_count <= 1 && inst->round_active) {
         GamePacket game_over_pkt = {0};
-        game_over_pkt.MessageType = MSG_GAME_OVER;
+        game_over_pkt.type = MSG_GAME_OVER;
         game_over_pkt.game_id = inst->game_id;
         if (alive_count == 1) {
             sprintf(game_over_pkt.text, GREEN "🏆 Player %d won the game!" RESET, winner_id + 1);
@@ -415,7 +415,7 @@ void* handle_client(void* arg) {
 
     GamePacket join_pkt = {0};
     int res = server_ipc.receive_packet(ta->fd, &join_pkt);
-    if (res <= 0 || join_pkt.MessageType != MSG_JOIN) {
+    if (res <= 0 || join_pkt.type != MSG_JOIN) {
         printf(BLUE "[SERVER]" RESET " " RED "❌ Invalid join packet.\n" RESET);
         server_ipc.close_conn(ta->fd);
         free(ta);
@@ -444,7 +444,7 @@ void* handle_client(void* arg) {
         instance = find_game(state, requested_game_id);
         if (!instance) {
             GamePacket err = {0};
-            err.MessageType = MSG_UPDATE;
+            err.type = MSG_UPDATE;
             err.game_id = requested_game_id;
             sprintf(err.text, RED "❌ Game %d does not exist." RESET, requested_game_id);
             server_ipc.send_packet(ta->fd, &err);
@@ -463,7 +463,7 @@ void* handle_client(void* arg) {
     pthread_mutex_lock(&instance->mutex);
     if (instance->connected_players_count >= instance->max_players) {
         GamePacket err = {0};
-        err.MessageType = MSG_UPDATE;
+        err.type = MSG_UPDATE;
         err.game_id = instance->game_id;
         sprintf(err.text, RED "❌ Game is full (max %d players)." RESET, instance->max_players);
         server_ipc.send_packet(ta->fd, &err);
@@ -511,7 +511,7 @@ void* handle_client(void* arg) {
             break;
         }
 
-        if (pkt.MessageType == MSG_QUIT) {
+        if (pkt.type == MSG_QUIT) {
             printf(BLUE "[SERVER %d]" RESET " " YELLOW "⚠️  Player %d: requested disconnect.\n" RESET, 
                    instance->game_id, my_id);
             break;
@@ -526,7 +526,7 @@ void* handle_client(void* arg) {
 
         int current_id = instance->current_player + 1;
 
-        if (pkt.MessageType == MSG_BET) {
+        if (pkt.type == MSG_BET) {
             if (my_id != current_id) {
                 pthread_mutex_unlock(&instance->mutex);
                 continue;
@@ -537,7 +537,7 @@ void* handle_client(void* arg) {
             continue;
         }
 
-        if (pkt.MessageType == MSG_LIAR) {
+        if (pkt.type == MSG_LIAR) {
             handle_liar_message(instance, server_ipc, my_id);
             pthread_mutex_unlock(&instance->mutex);
             continue;
