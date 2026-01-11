@@ -12,15 +12,14 @@ add_executable(client
     src/client.c
     src/client_state.c
     src/client_ui.c
-    src/socket_ipc.c
-    src/logic.c
+    src/ipc_socket.c
 )
 
 add_executable(server 
     src/server.c
-    src/socket_ipc.c
-    src/logic.c
-    src/game.c
+    src/server_player.c
+    src/server_game.c
+    src/ipc_socket.c
 )
 
 target_link_libraries(client PRIVATE Threads::Threads)

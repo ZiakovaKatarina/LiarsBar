@@ -4,15 +4,14 @@ add_executable(client
     client.c
     client_state.c
     client_ui.c
-    socket_ipc.c
-    logic.c
+    ipc_socket.c
 )
 
 add_executable(server
     server.c
-    socket_ipc.c
-    logic.c
-    game.c
+    server_player.c
+    server_game.c
+    ipc_socket.c
 )
 
 target_link_libraries(client PRIVATE Threads::Threads)
