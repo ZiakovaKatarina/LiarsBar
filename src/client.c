@@ -119,7 +119,7 @@ int main() {
             ui_show_rules();
             continue;
         } else if (choice == 1 || choice == 2) {
-            if (!client_connet(&state, "127.0.0.1", true)) {
+            if (!client_connect(&state, "127.0.0.1", true)) {
                 printf(RED "❌ Could not connect to server.\n" RESET);
                 ui_wait_enter();
                 continue;
@@ -139,7 +139,7 @@ int main() {
             }
 
             run_game_loop(&state);
-            client_disconnet(&state);
+            client_disconnect(&state);
             printf(RESET "\nReturning to menu...\n");
             sleep(1);
         } else {
