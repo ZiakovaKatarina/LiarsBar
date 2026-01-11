@@ -7,7 +7,7 @@
 #define MAX_GAMES 10
 #define MAX_LIVES 5
 
-typedef enum {
+typedef enum MessageType {
     MSG_JOIN,
     MSG_WELCOME,
     MSG_START_ROUND,
@@ -18,7 +18,7 @@ typedef enum {
     MSG_GAME_OVER
 } MessageType;
 
-typedef enum {
+typedef enum CardValue {
     CARD_QUEEN = 0,
     CARD_KING = 1,
     CARD_ACE = 2,
