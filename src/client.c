@@ -319,6 +319,11 @@ void game_loop(ClientThreadArgs *args, IPC_Interface ipc) {
             break;
         }
 
+        if (args->current_player_id != args->player_id) {
+            printf(RED "Not your turn!" RESET "\n");
+            continue;
+        }
+
         GamePacket pkt = parse_bet_input(input);
         if (pkt.MessageType == -1) {
             printf(RED "Invalid command. Try: '3 K' or 'liar'\n" RESET);

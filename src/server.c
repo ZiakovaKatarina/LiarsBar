@@ -51,7 +51,7 @@ void init_games(ServerState *state) {
     
     for (int i = 0; i < MAX_GAMES; i++) {
         state->games[i].active = false;
-        state->games[i].game_id = i;
+        state->games[i].game_id = i + 1;
         state->games[i].max_players = MAX_PLAYERS;
         pthread_mutex_init(&state->games[i].mutex, NULL);
         for (int j = 0; j < MAX_PLAYERS; j++) {
@@ -67,7 +67,7 @@ GameInstance* create_new_game(ServerState *state, int max_players) {
         if (!state->games[i].active) {
             memset(&state->games[i], 0, sizeof(GameInstance));
             state->games[i].active = true;
-            state->games[i].game_id = i;
+            state->games[i].game_id = i + 1;
             state->games[i].max_players = max_players;
             state->games[i].connected_players_count = 0;
             state->games[i].round_active = 0;
